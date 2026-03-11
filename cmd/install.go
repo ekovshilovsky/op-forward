@@ -23,7 +23,7 @@ OP_FORWARD_BIN="{{OP_FORWARD_BIN}}"
 
 # Delegate to op-forward proxy (handles tunnel probe, auth, JSON, HTTP)
 if [ -x "$OP_FORWARD_BIN" ]; then
-  "$OP_FORWARD_BIN" proxy "$@"
+  "$OP_FORWARD_BIN" proxy -- "$@"
   EXIT=$?
   # Exit code 0 or op-level non-zero: use as-is
   # If proxy itself failed (e.g. tunnel down), fall back to real op

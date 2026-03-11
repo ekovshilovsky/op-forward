@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,6 +19,15 @@ func newTestServer() (*Server, string) {
 		Expires: time.Now().Add(24 * time.Hour),
 	}
 	return &Server{token: token, port: 18340}, token.Value
+}
+
+// newTestServerWithTempToken creates a test server that writes tokens to a temp
+// directory instead of the real token path. Prevents tests from corrupting the
+// running daemon's token file.
+func newTestServerWithTempToken(t *testing.T) (*Server, string) {
+	t.Helper()
+	t.Setenv("OP_FORWARD_TOKEN_FILE", filepath.Join(t.TempDir(), "test.token"))
+	return newTestServer()
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -99,7 +109,7 @@ func TestExecute_WrongMethod(t *testing.T) {
 }
 
 func TestExecute_InvalidJSON(t *testing.T) {
-	srv, token := newTestServer()
+	srv, token := newTestServerWithTempToken(t)
 	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
@@ -112,7 +122,7 @@ func TestExecute_InvalidJSON(t *testing.T) {
 }
 
 func TestExecute_BlockedSubcommand(t *testing.T) {
-	srv, token := newTestServer()
+	srv, token := newTestServerWithTempToken(t)
 	body, _ := json.Marshal(executor.Request{Args: []string{"signin"}})
 	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)

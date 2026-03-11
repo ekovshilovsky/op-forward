@@ -16,9 +16,22 @@ import (
 	"github.com/ekovshilovsky/op-forward/internal/executor"
 )
 
+// proxyExitInfraFailure is the exit code the proxy uses to signal that
+// the forwarding infrastructure itself failed (no token, no tunnel, daemon
+// unreachable). The shim checks for this code to decide whether to fall
+// back to the real op binary. This is distinct from op-originated exit
+// codes which are relayed as-is.
+const proxyExitInfraFailure = 127
+
 // runProxy is the client-side command that forwards op arguments to the host
 // daemon and reproduces its stdout/stderr/exit code locally. This replaces
 // the previous bash+python3 approach in the shim, keeping all logic in Go.
+//
+// Exit code contract with the shim:
+//   - 127: proxy infrastructure failure (tunnel down, no token, daemon error)
+//          → shim falls back to real op binary
+//   - Any other code: relayed from the op command execution on the host
+//          → shim exits with that code directly
 func runProxy() error {
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
 	port := fs.Int("port", getProxyPort(), "Daemon port")
@@ -35,7 +48,8 @@ func runProxy() error {
 	}
 	tokenData, err := os.ReadFile(tokenFile)
 	if err != nil {
-		return fmt.Errorf("reading token: %w", err)
+		fmt.Fprintf(os.Stderr, "op-forward: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
 	}
 	token := strings.SplitN(strings.TrimSpace(string(tokenData)), "\n", 2)[0]
 
@@ -43,7 +57,8 @@ func runProxy() error {
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 	if err != nil {
-		return fmt.Errorf("tunnel not available on port %d", *port)
+		fmt.Fprintf(os.Stderr, "op-forward: tunnel not available on port %d\n", *port)
+		os.Exit(proxyExitInfraFailure)
 	}
 	conn.Close()
 
@@ -54,7 +69,8 @@ func runProxy() error {
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("encoding request: %w", err)
+		fmt.Fprintf(os.Stderr, "op-forward: encoding request: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
 	}
 
 	httpTimeout := time.Duration(*timeoutMs)*time.Millisecond + 5*time.Second
@@ -62,7 +78,8 @@ func runProxy() error {
 
 	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/op/execute", addr), bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		fmt.Fprintf(os.Stderr, "op-forward: creating request: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -70,27 +87,31 @@ func runProxy() error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("executing request: %w", err)
+		fmt.Fprintf(os.Stderr, "op-forward: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
+		fmt.Fprintf(os.Stderr, "op-forward: reading response: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Fprintf(os.Stderr, "op-forward: daemon returned HTTP %d\n", resp.StatusCode)
 		fmt.Fprint(os.Stderr, string(respBody))
-		os.Exit(1)
+		os.Exit(proxyExitInfraFailure)
 	}
 
 	// Parse JSON response
 	var result executor.Result
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("parsing response: %w", err)
+		fmt.Fprintf(os.Stderr, "op-forward: parsing response: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
 	}
 
+	// Relay op command output and exit code as-is
 	if result.Stdout != "" {
 		fmt.Fprint(os.Stdout, result.Stdout)
 	}
