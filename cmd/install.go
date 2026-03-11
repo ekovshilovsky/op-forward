@@ -11,89 +11,39 @@ import (
 )
 
 // shimTemplate is the op wrapper script installed on the remote side.
-// It intercepts all op invocations and forwards them to the host daemon.
+// It intercepts all op invocations and delegates to op-forward proxy,
+// which handles JSON encoding, HTTP transport, and response parsing in Go.
+// Falls back to the real op binary if op-forward proxy fails to connect.
 const shimTemplate = `#!/bin/bash
 # op-forward shim — forwards op commands to host daemon via SSH tunnel.
 # Installed by op-forward. Do not edit directly.
-#
-# Falls back to the real op binary if the tunnel is unavailable.
 
-set -euo pipefail
-
-OP_FORWARD_PORT="${OP_FORWARD_PORT:-{{PORT}}}"
-OP_FORWARD_PROBE_TIMEOUT="${OP_FORWARD_PROBE_TIMEOUT_MS:-500}"
-OP_FORWARD_FETCH_TIMEOUT="${OP_FORWARD_FETCH_TIMEOUT_MS:-60000}"
 REAL_OP="{{REAL_OP}}"
+OP_FORWARD_BIN="{{OP_FORWARD_BIN}}"
 
-# Read token from file (first line = token, second line = expiry)
-TOKEN_FILE="${OP_FORWARD_TOKEN_FILE:-${HOME}/.cache/op-forward/session.token}"
-if [ ! -f "$TOKEN_FILE" ]; then
-  if [ -n "$REAL_OP" ] && [ -x "$REAL_OP" ]; then
-    exec "$REAL_OP" "$@"
+# Delegate to op-forward proxy (handles tunnel probe, auth, JSON, HTTP)
+if [ -x "$OP_FORWARD_BIN" ]; then
+  "$OP_FORWARD_BIN" proxy "$@"
+  EXIT=$?
+  # Exit code 0 or op-level non-zero: use as-is
+  # If proxy itself failed (e.g. tunnel down), fall back to real op
+  if [ $EXIT -ne 127 ]; then
+    exit $EXIT
   fi
-  echo "op-forward: no token file and no fallback op binary" >&2
-  exit 1
-fi
-TOKEN=$(head -1 "$TOKEN_FILE")
-
-# Probe tunnel availability (fast TCP check)
-if ! bash -c "echo >/dev/tcp/127.0.0.1/$OP_FORWARD_PORT" 2>/dev/null; then
-  if [ -n "$REAL_OP" ] && [ -x "$REAL_OP" ]; then
-    exec "$REAL_OP" "$@"
-  fi
-  echo "op-forward: tunnel not available on port $OP_FORWARD_PORT" >&2
-  exit 1
 fi
 
-# Build JSON args array
-ARGS_JSON="["
-FIRST=true
-for arg in "$@"; do
-  if [ "$FIRST" = true ]; then
-    FIRST=false
-  else
-    ARGS_JSON+=","
-  fi
-  # Escape special JSON characters in the argument
-  ESCAPED=$(printf '%s' "$arg" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()), end="")')
-  ARGS_JSON+="$ESCAPED"
-done
-ARGS_JSON+="]"
-
-BODY="{\"args\":${ARGS_JSON},\"timeout_ms\":${OP_FORWARD_FETCH_TIMEOUT}}"
-
-# Execute via daemon
-RESPONSE=$(curl -s -w "\n%{http_code}" \
-  --max-time "$((OP_FORWARD_FETCH_TIMEOUT / 1000 + 5))" \
-  -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "User-Agent: op-forward/0.1" \
-  -d "$BODY" \
-  "http://127.0.0.1:${OP_FORWARD_PORT}/op/execute" 2>/dev/null)
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" != "200" ]; then
-  echo "op-forward: daemon returned HTTP $HTTP_CODE" >&2
-  echo "$RESPONSE_BODY" >&2
-  exit 1
+# Fallback to real op binary if proxy is unavailable
+if [ -n "$REAL_OP" ] && [ -x "$REAL_OP" ]; then
+  exec "$REAL_OP" "$@"
 fi
 
-# Parse JSON response and output stdout/stderr appropriately
-STDOUT=$(echo "$RESPONSE_BODY" | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r.get("stdout",""), end="")')
-STDERR=$(echo "$RESPONSE_BODY" | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r.get("stderr",""), end="")')
-EXIT_CODE=$(echo "$RESPONSE_BODY" | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r.get("exit_code",1))')
-
-[ -n "$STDOUT" ] && printf '%s' "$STDOUT"
-[ -n "$STDERR" ] && printf '%s' "$STDERR" >&2
-exit "$EXIT_CODE"
+echo "op-forward: proxy unavailable and no fallback op binary" >&2
+exit 1
 `
 
 func runInstall() error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
-	port := fs.Int("port", getInstallPort(), "Daemon port")
+	_ = fs.Int("port", getInstallPort(), "Daemon port (stored in shim for legacy compat)")
 	fs.Parse(os.Args[2:])
 
 	// Find the real op binary (before our shim shadows it)
@@ -103,12 +53,21 @@ func runInstall() error {
 	shimDir := filepath.Join(os.Getenv("HOME"), ".local", "bin")
 	shimPath := filepath.Join(shimDir, "op")
 
+	// Locate the op-forward binary (should be in the same directory)
+	opForwardBin := filepath.Join(shimDir, "op-forward")
+	if _, err := os.Stat(opForwardBin); err != nil {
+		// Try the current executable path
+		if exe, err := os.Executable(); err == nil {
+			opForwardBin = exe
+		}
+	}
+
 	if err := os.MkdirAll(shimDir, 0755); err != nil {
 		return fmt.Errorf("creating shim directory: %w", err)
 	}
 
-	// Generate the shim script with the correct port and real op path
-	shim := strings.ReplaceAll(shimTemplate, "{{PORT}}", strconv.Itoa(*port))
+	// Generate the shim script with paths to op-forward binary and real op
+	shim := strings.ReplaceAll(shimTemplate, "{{OP_FORWARD_BIN}}", opForwardBin)
 	shim = strings.ReplaceAll(shim, "{{REAL_OP}}", realOp)
 
 	if err := os.WriteFile(shimPath, []byte(shim), 0755); err != nil {

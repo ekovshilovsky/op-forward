@@ -18,6 +18,8 @@ func Execute() error {
 		return runServe()
 	case "install":
 		return runInstall()
+	case "proxy":
+		return runProxy()
 	case "service":
 		return runService()
 	case "version":
@@ -39,6 +41,7 @@ func printUsage() {
 Usage:
   op-forward serve [--port PORT]    Start the host daemon
   op-forward install [--port PORT]  Install the op shim on the remote side
+  op-forward proxy [args...]        Forward an op command to the host daemon
   op-forward service install        Install as a launchd daemon (macOS)
   op-forward service uninstall      Remove the launchd daemon
   op-forward version                Print version

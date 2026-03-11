@@ -116,6 +116,7 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 // authenticate verifies the Bearer token from the request.
 // Uses constant-time comparison to prevent timing side-channel attacks.
+// Mutex protects reads of token state against concurrent renewal writes.
 func (s *Server) authenticate(r *http.Request) bool {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
@@ -125,8 +126,12 @@ func (s *Server) authenticate(r *http.Request) bool {
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		return false
 	}
-	tokenMatch := subtle.ConstantTimeCompare([]byte(parts[1]), []byte(s.token.Value)) == 1
-	return tokenMatch && s.token.IsValid()
+	s.mu.Lock()
+	tokenVal := s.token.Value
+	valid := s.token.IsValid()
+	s.mu.Unlock()
+	tokenMatch := subtle.ConstantTimeCompare([]byte(parts[1]), []byte(tokenVal)) == 1
+	return tokenMatch && valid
 }
 
 // sanitizeArgsForLog redacts potentially sensitive arguments for logging.
