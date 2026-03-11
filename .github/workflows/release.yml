@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build release binaries
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          for PAIR in "linux amd64" "linux arm64" "darwin amd64" "darwin arm64"; do
+            OS=$(echo $PAIR | cut -d' ' -f1)
+            ARCH=$(echo $PAIR | cut -d' ' -f2)
+            DIR="op-forward_${VERSION}_${OS}_${ARCH}"
+            mkdir -p "dist/${DIR}"
+            GOOS=$OS GOARCH=$ARCH go build -ldflags="-s -w" -o "dist/${DIR}/op-forward" .
+            tar -czf "dist/${DIR}.tar.gz" -C "dist/${DIR}" op-forward
+          done
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" dist/*.tar.gz \
+            --title "$TAG_NAME" \
+            --generate-notes
