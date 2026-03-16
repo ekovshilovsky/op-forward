@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 const (
@@ -101,14 +103,35 @@ func Execute(req *Request) (*Result, error) {
 
 	cmd := exec.CommandContext(ctx, opPath, req.Args...)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Run op inside a full pseudo-TTY so it detects an interactive session
+	// on all file descriptors (stdin, stdout, stderr). Without a TTY,
+	// 1Password caches the biometric approval and skips Touch ID on
+	// subsequent calls. With a full PTY, each invocation triggers a fresh
+	// biometric prompt — matching the behavior of running op directly in
+	// a terminal.
+	//
+	// Trade-off: PTY merges stdout and stderr into a single stream. We
+	// capture the combined output as stdout and leave stderr empty.
+	cmd.SysProcAttr = newSysProcAttr()
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("starting op with pty: %w", err)
+	}
 
-	// OP_BIOMETRIC_UNLOCK_ENABLED must be set for Touch ID integration.
-	// The command inherits the host's environment, including this variable.
+	// Disable the PTY's output post-processing (OPOST) so the line discipline
+	// does not convert \n to \r\n. This preserves the raw output from op and
+	// avoids fragile string replacement that could corrupt binary data or
+	// fields containing legitimate carriage returns. Platform-specific because
+	// macOS uses TIOCGETA/TIOCSETA and Linux uses TCGETS/TCSETS.
+	disableOutputPostProcessing(ptmx)
 
-	err = cmd.Run()
+	// Read all output from the PTY master
+	var output bytes.Buffer
+	_, _ = output.ReadFrom(ptmx)
+	_ = ptmx.Close()
+
+	// Wait for the command to finish
+	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -124,8 +147,8 @@ func Execute(req *Request) (*Result, error) {
 	}
 
 	return &Result{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
+		Stdout:   output.String(),
+		Stderr:   "",
 		ExitCode: exitCode,
 	}, nil
 }
