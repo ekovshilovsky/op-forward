@@ -5,7 +5,10 @@ import (
 	"os"
 )
 
-const Version = "0.1.0"
+// Version is set at build time via ldflags:
+//
+//	go build -ldflags="-X github.com/ekovshilovsky/op-forward/cmd.Version=0.3.0"
+var Version = "dev"
 
 func Execute() error {
 	if len(os.Args) < 2 {
@@ -22,6 +25,8 @@ func Execute() error {
 		return runProxy()
 	case "service":
 		return runService()
+	case "update":
+		return runUpdate()
 	case "version":
 		fmt.Printf("op-forward %s\n", Version)
 		return nil
@@ -44,6 +49,7 @@ Usage:
   op-forward proxy [args...]        Forward an op command to the host daemon
   op-forward service install        Install as a launchd daemon (macOS)
   op-forward service uninstall      Remove the launchd daemon
+  op-forward update                 Update to the latest release
   op-forward version                Print version
 
 The host daemon executes 'op' commands locally, triggering biometric

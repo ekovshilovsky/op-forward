@@ -1,6 +1,6 @@
-VERSION ?= 0.1.0
+VERSION ?= 0.3.0
 BINARY  := op-forward
-LDFLAGS := -s -w
+LDFLAGS := -s -w -X github.com/ekovshilovsky/op-forward/cmd.Version=$(VERSION)
 
 .PHONY: build build-all clean test
 
