@@ -20,6 +20,14 @@ The developer experience is transparent: run `op account list` or `op item get <
 
 ### Install on macOS (host)
 
+Via Homebrew:
+
+```bash
+brew install ekovshilovsky/tap/op-forward
+```
+
+Via the install script:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ekovshilovsky/op-forward/main/scripts/install.sh | sh
 ```
@@ -29,7 +37,7 @@ Or build from source:
 ```bash
 git clone https://github.com/ekovshilovsky/op-forward.git
 cd op-forward
-go build -o op-forward .
+go build -ldflags="-s -w" -o op-forward .
 cp op-forward ~/.local/bin/
 ```
 
@@ -91,6 +99,7 @@ op-forward serve [--port PORT]    Start the host daemon
 op-forward install [--port PORT]  Install the op shim on the remote side
 op-forward service install        Install as a launchd daemon (macOS)
 op-forward service uninstall      Remove the launchd daemon
+op-forward update                 Update to the latest release
 op-forward version                Print version
 ```
 
@@ -136,6 +145,24 @@ ssh -fN -R 18340:127.0.0.1:18340 user@remote-host
 ```
 
 The `ControlMaster=no` flag is important when using SSH multiplexing — multiplexed connections only establish `RemoteForward` on the first connection. A dedicated tunnel connection avoids this.
+
+## Updating
+
+Self-update to the latest release:
+
+```bash
+op-forward update
+```
+
+This downloads the latest binary from GitHub Releases for your platform, replaces the running binary in-place, and the launchd service restarts automatically.
+
+If installed via Homebrew:
+
+```bash
+brew upgrade ekovshilovsky/tap/op-forward
+```
+
+The Homebrew formula is updated automatically on each release.
 
 ## Building
 
