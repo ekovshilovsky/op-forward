@@ -18,7 +18,7 @@ func newTestServer() (*Server, string) {
 		Value:   "test-token-abc123",
 		Expires: time.Now().Add(24 * time.Hour),
 	}
-	return &Server{token: token, port: 18340}, token.Value
+	return &Server{token: token, port: 18340, version: "0.3.0"}, token.Value
 }
 
 // newTestServerWithTempToken creates a test server that writes tokens to a temp
@@ -80,7 +80,7 @@ func TestExecute_ExpiredToken(t *testing.T) {
 		Value:   "expired-token",
 		Expires: time.Now().Add(-time.Hour),
 	}
-	srv := &Server{token: token, port: 18340}
+	srv := &Server{token: token, port: 18340, version: "0.3.0"}
 
 	body, _ := json.Marshal(executor.Request{Args: []string{"account", "list"}})
 	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader(body))
@@ -214,5 +214,89 @@ func TestSanitizeArgsForLog(t *testing.T) {
 				t.Errorf("sanitizeArgsForLog(%v) = %q, want %q", tt.args, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestExecute_VersionNegotiation_UpdateAvailable(t *testing.T) {
+	srv, token := newTestServerWithTempToken(t)
+	body, _ := json.Marshal(executor.Request{Args: []string{"account", "list"}})
+	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Client-Version", "0.2.0")
+	w := httptest.NewRecorder()
+
+	srv.handleExecute(w, req)
+
+	// Request should succeed (0.2.0 >= MinClientVersion 0.1.0)
+	if w.Code == http.StatusUpgradeRequired {
+		t.Errorf("status = 426, client 0.2.0 should not be rejected")
+	}
+
+	// Should advertise that an update is available
+	if avail := w.Header().Get("X-Update-Available"); avail != "0.3.0" {
+		t.Errorf("X-Update-Available = %q, want %q", avail, "0.3.0")
+	}
+}
+
+func TestExecute_VersionNegotiation_UpgradeRequired(t *testing.T) {
+	srv, token := newTestServerWithTempToken(t)
+
+	// Temporarily raise the minimum version to force a rejection
+	origMin := MinClientVersion
+	MinClientVersion = "0.3.0"
+	defer func() { MinClientVersion = origMin }()
+
+	body, _ := json.Marshal(executor.Request{Args: []string{"account", "list"}})
+	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Client-Version", "0.2.0")
+	w := httptest.NewRecorder()
+
+	srv.handleExecute(w, req)
+
+	if w.Code != http.StatusUpgradeRequired {
+		t.Errorf("status = %d, want 426 for client below minimum version", w.Code)
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] == "" {
+		t.Error("response should contain an error message")
+	}
+}
+
+func TestExecute_VersionNegotiation_CurrentClient(t *testing.T) {
+	srv, token := newTestServerWithTempToken(t)
+	body, _ := json.Marshal(executor.Request{Args: []string{"account", "list"}})
+	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Client-Version", "0.3.0")
+	w := httptest.NewRecorder()
+
+	srv.handleExecute(w, req)
+
+	// No update header when client matches server version
+	if avail := w.Header().Get("X-Update-Available"); avail != "" {
+		t.Errorf("X-Update-Available = %q, want empty for current client", avail)
+	}
+}
+
+func TestExecute_VersionNegotiation_NoHeader(t *testing.T) {
+	srv, token := newTestServerWithTempToken(t)
+	body, _ := json.Marshal(executor.Request{Args: []string{"account", "list"}})
+	req := httptest.NewRequest("POST", "/op/execute", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	// No X-Client-Version header — older clients that don't send it
+	w := httptest.NewRecorder()
+
+	srv.handleExecute(w, req)
+
+	// Should not reject clients that don't send the header (backward compatible)
+	if w.Code == http.StatusUpgradeRequired {
+		t.Error("should not reject clients without X-Client-Version header")
 	}
 }
