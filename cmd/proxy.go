@@ -29,9 +29,9 @@ const proxyExitInfraFailure = 127
 //
 // Exit code contract with the shim:
 //   - 127: proxy infrastructure failure (tunnel down, no token, daemon error)
-//          → shim falls back to real op binary
+//     → shim falls back to real op binary
 //   - Any other code: relayed from the op command execution on the host
-//          → shim exits with that code directly
+//     → shim exits with that code directly
 func runProxy() error {
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
 	port := fs.Int("port", getProxyPort(), "Daemon port")

@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	TokenLength    = 32 // 32 bytes = 64 hex chars
-	DefaultTTL     = 30 * 24 * time.Hour
-	RenewalFactor  = 0.5 // Renew when less than half TTL remains
-	TokenFileName  = "session.token"
-	CacheDirName   = "op-forward"
+	TokenLength   = 32 // 32 bytes = 64 hex chars
+	DefaultTTL    = 30 * 24 * time.Hour
+	RenewalFactor = 0.5 // Renew when less than half TTL remains
+	TokenFileName = "session.token"
+	CacheDirName  = "op-forward"
 )
 
 // Token represents an authentication token with expiry.

@@ -35,22 +35,9 @@ func runUpdate() error {
 	fmt.Printf("Current version: %s\n", Version)
 	fmt.Println("Checking for updates...")
 
-	resp, err := http.Get(fmt.Sprintf(
-		"https://api.github.com/repos/%s/%s/releases/latest",
-		githubOwner, githubRepo,
-	))
+	release, err := fetchLatestRelease()
 	if err != nil {
-		return fmt.Errorf("checking for updates: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return fmt.Errorf("parsing release info: %w", err)
+		return err
 	}
 
 	latestVersion := strings.TrimPrefix(release.TagName, "v")
@@ -61,9 +48,48 @@ func runUpdate() error {
 
 	fmt.Printf("New version available: v%s → v%s\n", Version, latestVersion)
 
-	// Locate the tarball matching the current platform
+	newBinary, err := downloadReleaseBinary(release, latestVersion)
+	if err != nil {
+		return err
+	}
+
+	execPath, err := replaceBinary(newBinary)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Updated to v%s\n", latestVersion)
+	restartDaemon(execPath)
+	return nil
+}
+
+// fetchLatestRelease queries the GitHub API for the most recent release.
+func fetchLatestRelease() (*githubRelease, error) {
+	resp, err := http.Get(fmt.Sprintf(
+		"https://api.github.com/repos/%s/%s/releases/latest",
+		githubOwner, githubRepo,
+	))
+	if err != nil {
+		return nil, fmt.Errorf("checking for updates: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("parsing release info: %w", err)
+	}
+	return &release, nil
+}
+
+// downloadReleaseBinary finds and downloads the platform-appropriate binary
+// from the release assets.
+func downloadReleaseBinary(release *githubRelease, version string) ([]byte, error) {
 	wantName := fmt.Sprintf("op-forward_%s_%s_%s.tar.gz",
-		latestVersion, runtime.GOOS, runtime.GOARCH)
+		version, runtime.GOOS, runtime.GOARCH)
 
 	var downloadURL string
 	for _, asset := range release.Assets {
@@ -73,67 +99,65 @@ func runUpdate() error {
 		}
 	}
 	if downloadURL == "" {
-		return fmt.Errorf("no release binary found for %s/%s", runtime.GOOS, runtime.GOARCH)
+		return nil, fmt.Errorf("no release binary found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	fmt.Printf("Downloading %s...\n", wantName)
 
-	dlResp, err := http.Get(downloadURL)
+	resp, err := http.Get(downloadURL)
 	if err != nil {
-		return fmt.Errorf("downloading update: %w", err)
+		return nil, fmt.Errorf("downloading update: %w", err)
 	}
-	defer dlResp.Body.Close()
+	defer resp.Body.Close()
 
-	if dlResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned status %d", dlResp.StatusCode)
-	}
-
-	newBinary, err := extractBinaryFromTarGz(dlResp.Body)
-	if err != nil {
-		return err
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download returned status %d", resp.StatusCode)
 	}
 
-	// Resolve the real path of the running binary (follows symlinks)
+	return extractBinaryFromTarGz(resp.Body)
+}
+
+// replaceBinary atomically replaces the running binary with new contents.
+// Returns the resolved path of the replaced binary.
+func replaceBinary(newBinary []byte) (string, error) {
 	execPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("determining binary path: %w", err)
+		return "", fmt.Errorf("determining binary path: %w", err)
 	}
 	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
-		return fmt.Errorf("resolving binary path: %w", err)
+		return "", fmt.Errorf("resolving binary path: %w", err)
 	}
 
-	// Atomic replacement: write to a temp file in the same directory, then rename
 	tmpPath := execPath + ".update"
 	if err := os.WriteFile(tmpPath, newBinary, 0755); err != nil {
-		return fmt.Errorf("writing update: %w", err)
+		return "", fmt.Errorf("writing update: %w", err)
 	}
 	if err := os.Rename(tmpPath, execPath); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("replacing binary: %w", err)
+		return "", fmt.Errorf("replacing binary: %w", err)
 	}
-
-	fmt.Printf("Updated to v%s\n", latestVersion)
-
-	// Signal the running daemon to exit so launchd restarts it with the new binary.
-	// The daemon's KeepAlive plist directive causes launchd to respawn it automatically.
-	if pid := findDaemonPID(execPath); pid > 0 {
-		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-			fmt.Printf("Could not restart daemon (PID %d): %v — restart manually with: launchctl kickstart gui/$(id -u)/com.op-forward.daemon\n", pid, err)
-		} else {
-			fmt.Printf("Daemon restarted (PID %d terminated, launchd will respawn).\n", pid)
-		}
-	} else {
-		fmt.Println("No running daemon found. It will pick up the new version on next start.")
-	}
-
-	return nil
+	return execPath, nil
 }
 
-// findDaemonPID locates the running op-forward serve process by scanning /proc
-// or using the binary path. Returns 0 if no daemon is found.
+// restartDaemon sends SIGTERM to the running op-forward daemon so launchd
+// respawns it with the updated binary.
+func restartDaemon(binPath string) {
+	pid := findDaemonPID(binPath)
+	if pid == 0 {
+		fmt.Println("No running daemon found. It will pick up the new version on next start.")
+		return
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		fmt.Printf("Could not restart daemon (PID %d): %v — restart manually with: launchctl kickstart gui/$(id -u)/com.op-forward.daemon\n", pid, err)
+		return
+	}
+	fmt.Printf("Daemon restarted (PID %d terminated, launchd will respawn).\n", pid)
+}
+
+// findDaemonPID locates the running op-forward serve process.
+// Returns 0 if no daemon is found.
 func findDaemonPID(binPath string) int {
-	// Use pgrep to find the daemon PID — portable across macOS and Linux
 	out, err := osexec.Command("pgrep", "-f", binPath+" serve").Output()
 	if err != nil {
 		return 0
@@ -142,13 +166,11 @@ func findDaemonPID(binPath string) int {
 	if line == "" {
 		return 0
 	}
-	// Take the first PID if multiple lines
 	parts := strings.SplitN(line, "\n", 2)
 	pid, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil {
 		return 0
 	}
-	// Don't kill ourselves
 	if pid == os.Getpid() {
 		return 0
 	}
