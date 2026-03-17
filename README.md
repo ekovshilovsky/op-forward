@@ -1,5 +1,11 @@
 # op-forward
 
+[![CI](https://github.com/ekovshilovsky/op-forward/actions/workflows/ci.yml/badge.svg)](https://github.com/ekovshilovsky/op-forward/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ekovshilovsky/op-forward)](https://github.com/ekovshilovsky/op-forward/releases/latest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ekovshilovsky/op-forward)](https://goreportcard.com/report/github.com/ekovshilovsky/op-forward)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/ekovshilovsky/op-forward)](go.mod)
+
 Forward 1Password CLI (`op`) commands across SSH boundaries with biometric authentication.
 
 ## The Problem
