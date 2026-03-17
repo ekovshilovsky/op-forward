@@ -8,9 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -111,8 +114,45 @@ func runUpdate() error {
 	}
 
 	fmt.Printf("Updated to v%s\n", latestVersion)
-	fmt.Println("The daemon will restart automatically via launchd.")
+
+	// Signal the running daemon to exit so launchd restarts it with the new binary.
+	// The daemon's KeepAlive plist directive causes launchd to respawn it automatically.
+	if pid := findDaemonPID(execPath); pid > 0 {
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			fmt.Printf("Could not restart daemon (PID %d): %v — restart manually with: launchctl kickstart gui/$(id -u)/com.op-forward.daemon\n", pid, err)
+		} else {
+			fmt.Printf("Daemon restarted (PID %d terminated, launchd will respawn).\n", pid)
+		}
+	} else {
+		fmt.Println("No running daemon found. It will pick up the new version on next start.")
+	}
+
 	return nil
+}
+
+// findDaemonPID locates the running op-forward serve process by scanning /proc
+// or using the binary path. Returns 0 if no daemon is found.
+func findDaemonPID(binPath string) int {
+	// Use pgrep to find the daemon PID — portable across macOS and Linux
+	out, err := osexec.Command("pgrep", "-f", binPath+" serve").Output()
+	if err != nil {
+		return 0
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return 0
+	}
+	// Take the first PID if multiple lines
+	parts := strings.SplitN(line, "\n", 2)
+	pid, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0
+	}
+	// Don't kill ourselves
+	if pid == os.Getpid() {
+		return 0
+	}
+	return pid
 }
 
 // extractBinaryFromTarGz reads a .tar.gz stream and returns the op-forward binary contents.
