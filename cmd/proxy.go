@@ -84,6 +84,7 @@ func runProxy() error {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "op-forward/"+Version)
+	req.Header.Set("X-Client-Version", Version)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -95,6 +96,19 @@ func runProxy() error {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "op-forward: reading response: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
+	}
+
+	// Surface update availability to the user via stderr so it
+	// does not interfere with stdout (which carries op output).
+	if avail := resp.Header.Get("X-Update-Available"); avail != "" {
+		fmt.Fprintf(os.Stderr, "op-forward: update available (v%s → v%s) — run: op-forward update\n", Version, avail)
+	}
+
+	// 426 Upgrade Required means the client is below the daemon's
+	// minimum version and must update before further commands.
+	if resp.StatusCode == http.StatusUpgradeRequired {
+		fmt.Fprintf(os.Stderr, "op-forward: %s\n", string(respBody))
 		os.Exit(proxyExitInfraFailure)
 	}
 

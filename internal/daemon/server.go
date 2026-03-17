@@ -13,18 +13,27 @@ import (
 
 	"github.com/ekovshilovsky/op-forward/internal/auth"
 	"github.com/ekovshilovsky/op-forward/internal/executor"
+	"github.com/ekovshilovsky/op-forward/internal/version"
 )
+
+// MinClientVersion is the oldest client version the daemon will accept.
+// Bump this when a release contains a security fix or breaking protocol
+// change that older clients must not bypass.
+var MinClientVersion = "0.1.0"
 
 // Server is the host-side HTTP daemon that executes op commands.
 type Server struct {
-	token *auth.Token
-	mu    sync.Mutex // Protects token state during concurrent renewal
-	port  int
+	token   *auth.Token
+	mu      sync.Mutex // Protects token state during concurrent renewal
+	port    int
+	version string // Server's own version, used for client compatibility checks
 }
 
-// New creates a new daemon server.
-func New(token *auth.Token, port int) *Server {
-	return &Server{token: token, port: port}
+// New creates a new daemon server. The version parameter should be the
+// build-time version string (e.g., cmd.Version) so the daemon can
+// advertise available updates to older clients.
+func New(token *auth.Token, port int, version string) *Server {
+	return &Server{token: token, port: port, version: version}
 }
 
 // Start begins listening on the loopback interface.
@@ -73,6 +82,22 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	if !s.authenticate(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Check client version compatibility
+	if clientVersion := r.Header.Get("X-Client-Version"); clientVersion != "" {
+		upgradeRequired, updateAvailable, message := version.CheckCompatibility(
+			clientVersion, s.version, MinClientVersion,
+		)
+		if updateAvailable != "" {
+			w.Header().Set("X-Update-Available", updateAvailable)
+		}
+		if upgradeRequired {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUpgradeRequired)
+			json.NewEncoder(w).Encode(map[string]string{"error": message})
+			return
+		}
 	}
 
 	// Limit request body to 1 MB to prevent resource exhaustion

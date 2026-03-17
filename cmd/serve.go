@@ -38,7 +38,7 @@ func runServe() error {
 
 	fmt.Printf("Starting daemon on 127.0.0.1:%d\n", *port)
 
-	server := daemon.New(token, *port)
+	server := daemon.New(token, *port, Version)
 	return server.Start()
 }
 
