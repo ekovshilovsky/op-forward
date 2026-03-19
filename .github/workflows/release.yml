@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   test:
@@ -107,3 +108,74 @@ jobs:
           git add Formula/op-forward.rb
           git diff --cached --quiet || git commit -m "Update op-forward to ${VERSION}"
           git push
+
+      - name: Build .deb packages
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          scripts/build-deb.sh "$VERSION" dist deb-out
+
+      - name: Build and publish APT repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+
+          # Import the GPG signing key if available
+          if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            export GPG_KEY_ID
+          fi
+
+          # Clone or initialize the gh-pages branch for the APT repo
+          if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+            git clone --branch gh-pages --single-branch \
+              "https://x-access-token:${GH_TOKEN}@github.com/ekovshilovsky/op-forward.git" /tmp/apt-repo
+          else
+            mkdir -p /tmp/apt-repo
+            cd /tmp/apt-repo
+            git init
+            git checkout -b gh-pages
+            cd -
+          fi
+
+          # Build the APT repo from .deb packages
+          # Copy new .deb files into the pool (keep previous versions for users who haven't upgraded)
+          mkdir -p /tmp/apt-repo/pool
+          cp deb-out/*.deb /tmp/apt-repo/pool/
+
+          scripts/build-apt-repo.sh /tmp/apt-repo
+
+          # Add installation instructions as index page
+          cat > /tmp/apt-repo/index.html <<INDEXEOF
+          <!DOCTYPE html>
+          <html><head><title>op-forward APT Repository</title></head>
+          <body>
+          <h1>op-forward APT Repository</h1>
+          <pre>
+          # Add the repository
+          curl -fsSL https://ekovshilovsky.github.io/op-forward/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/op-forward.gpg
+          echo "deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/op-forward.gpg] https://ekovshilovsky.github.io/op-forward stable main" | sudo tee /etc/apt/sources.list.d/op-forward.list
+          sudo apt-get update
+          sudo apt-get install op-forward
+          </pre>
+          </body></html>
+          INDEXEOF
+
+          # Commit and push to gh-pages
+          cd /tmp/apt-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Update APT repo for v${VERSION}"
+
+          if git remote | grep -q origin; then
+            git push origin gh-pages
+          else
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/ekovshilovsky/op-forward.git"
+            git push -u origin gh-pages
+          fi

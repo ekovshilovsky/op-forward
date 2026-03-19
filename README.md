@@ -59,28 +59,41 @@ op-forward service install
 
 The daemon listens on `127.0.0.1:18340` (loopback only) and generates a bearer token at `~/Library/Caches/op-forward/session.token`.
 
-### Set up the remote side (VM)
+### Set up the remote side (VM / Linux)
 
-1. Copy the Linux binary and install the shim:
+Via APT (Ubuntu/Debian — recommended for VMs):
 
 ```bash
-# Build for Linux (if cross-compiling from macOS)
-GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o op-forward-linux-arm64 .
+# Add the repository signing key and source
+curl -fsSL https://ekovshilovsky.github.io/op-forward/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/op-forward.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/op-forward.gpg] https://ekovshilovsky.github.io/op-forward stable main" | sudo tee /etc/apt/sources.list.d/op-forward.list
+sudo apt-get update
+sudo apt-get install op-forward
 
-# Copy to VM
-scp op-forward-linux-arm64 vm:~/.local/bin/op-forward
-
-# Install the op shim on the VM
-ssh vm '~/.local/bin/op-forward install --port 18340'
+# Install the op shim
+op-forward install
 ```
 
-2. Deploy the auth token:
+To upgrade: `sudo apt-get update && sudo apt-get upgrade op-forward`
+
+Via manual download:
 
 ```bash
+# Download the latest release for your architecture
+curl -fsSL https://github.com/ekovshilovsky/op-forward/releases/latest/download/op-forward_$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').tar.gz | tar -xz -C ~/.local/bin/
+
+# Install the op shim
+op-forward install
+```
+
+After installing, deploy the auth token and start the SSH tunnel:
+
+```bash
+# Deploy auth token (from host)
 scp ~/Library/Caches/op-forward/session.token vm:~/.cache/op-forward/session.token
 ```
 
-3. Start the SSH tunnel:
+Start the SSH tunnel:
 
 ```bash
 ssh -R 18340:127.0.0.1:18340 vm
