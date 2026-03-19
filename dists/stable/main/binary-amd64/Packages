@@ -1,0 +1,17 @@
+Package: op-forward
+Version: 0.6.0
+Architecture: amd64
+Maintainer: Eugene Kovshilovsky <ekovshilovsky@users.noreply.github.com>
+Filename: pool/op-forward_0.6.0_amd64.deb
+Size: 2411730
+MD5sum: 5164365e46790b5aba66f133ad60365e
+SHA1: d6e94bd538f851cc48edcc53c7498224d599a727
+SHA256: 2e1f2f1175b157835ba31a8324f767e0afa5343c154bcff6d1d11c74f1f7f007
+Section: utils
+Priority: optional
+Homepage: https://github.com/ekovshilovsky/op-forward
+Description: Forward 1Password CLI across SSH boundaries with biometric auth
+ op-forward runs a daemon on the host and installs a transparent op shim on the
+ remote side so that 1Password CLI commands inside VMs are forwarded to the host
+ and authenticated via Touch ID.
+

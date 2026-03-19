@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html><head><title>op-forward APT Repository</title></head>
+<body>
+<h1>op-forward APT Repository</h1>
+<pre>
+# Add the repository
+curl -fsSL https://ekovshilovsky.github.io/op-forward/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/op-forward.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/op-forward.gpg] https://ekovshilovsky.github.io/op-forward stable main" | sudo tee /etc/apt/sources.list.d/op-forward.list
+sudo apt-get update
+sudo apt-get install op-forward
+</pre>
+</body></html>
