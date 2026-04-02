@@ -37,6 +37,7 @@ Origin: op-forward
 Label: op-forward
 Suite: stable
 Codename: stable
+Date: $(date -u '+%a, %d %b %Y %H:%M:%S UTC')
 Architectures: amd64 arm64
 Components: main
 Description: op-forward APT repository — forward 1Password CLI across SSH boundaries
