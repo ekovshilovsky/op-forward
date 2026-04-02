@@ -1,12 +1,12 @@
 Package: op-forward
-Version: 0.6.0
+Version: 0.6.1
 Architecture: arm64
 Maintainer: Eugene Kovshilovsky <ekovshilovsky@users.noreply.github.com>
-Filename: pool/op-forward_0.6.0_arm64.deb
-Size: 2139688
-MD5sum: f6573b3acee71940348ce778ae414558
-SHA1: 5bf80bba825d8729961d7bc31f805fb1c6f2ab4e
-SHA256: 926cfb5fcd1a9cbe4156df1eb7ebbed31279da61fc17e75d8a4cbc15e9af8ac7
+Filename: pool/op-forward_0.6.1_arm64.deb
+Size: 2139626
+MD5sum: 766da9fc0637a5f5a9870db3fb089555
+SHA1: ec0bf791f6d92dd5a595f947e46a6e4ed70ebc79
+SHA256: f3a043d1c3c9e41c6e0a756260d1efdd1156c322615fb4c912ad646c6e1a67eb
 Section: utils
 Priority: optional
 Homepage: https://github.com/ekovshilovsky/op-forward

@@ -5,23 +5,24 @@ Origin: op-forward
 Label: op-forward
 Suite: stable
 Codename: stable
+Date: Thu, 02 Apr 2026 16:22:39 UTC
 Architectures: amd64 arm64
 Components: main
 Description: op-forward APT repository — forward 1Password CLI across SSH boundaries
 MD5Sum:
- d4b1203d2ca4bb9c9d431b6393bce763 705 main/binary-amd64/Packages
- 0fda5693655182b6be2fdf5720d3bed2 705 main/binary-arm64/Packages
- 88c52066252a3852d2f52b7e45687b4f 481 main/binary-amd64/Packages.gz
- 96bba4c33e33a2363bfbf28dfd2b3d16 480 main/binary-arm64/Packages.gz
+ cfc7a1454144a39b2305c25924e9b446 705 main/binary-amd64/Packages
+ af69fe022de816ee5c4fcdf17eaf9c2a 705 main/binary-arm64/Packages
+ ce3fec354c477ecbca38d786915ea38b 481 main/binary-amd64/Packages.gz
+ c9940c26ed09d641bc857de878bf7141 480 main/binary-arm64/Packages.gz
 SHA256:
- 0462d12b3dc488344a8e2fd58ef3dd596ddf2331b61073dcc82cf2fcbd8809a5 705 main/binary-amd64/Packages
- 4f8b5fc14024a5a9f998ea8b6afb903081b46b1b73fb6af425c64dc17f497ed6 705 main/binary-arm64/Packages
- a63359353e1d23c641b05d8cdc9370f7149990081f1cbe2499bfee825db1d690 481 main/binary-amd64/Packages.gz
- c83800f5609a2d1bca5f2d839308b4f29c2ae4b6fb2f4c3c21fb9f63aba14253 480 main/binary-arm64/Packages.gz
+ fad6f37cf8cd30f18910fdb23e70c71992184a69be0eb414feb25f373fe46f9a 705 main/binary-amd64/Packages
+ 7cb4f88a050509c9986fd347b9504b76bb0aeab8ab089c1a59f37837a5bbd2fc 705 main/binary-arm64/Packages
+ 3060f3daecd773e8bbfb6d26be493eaefb07f67397356c935a962cedbbe0b9c1 481 main/binary-amd64/Packages.gz
+ 95dbdabc748d86191739ae1b7591fdf642eabac1e199c368e2a7473134aa99b1 480 main/binary-arm64/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQRtV5DblbUIlVnXb9kQnapClxC3XQUCabyEFAAKCRAQnapClxC3
-XaKAAP0U1FoFojAusgeVVhocyquTK0kYevx/uUQ1K4KjTTgF5wD8CVwBaoSVfwxH
-aZthbIDKAIdKwYfVWTZmUd4zRFJsIAw=
-=rwbX
+iHUEARYKAB0WIQRtV5DblbUIlVnXb9kQnapClxC3XQUCac6XzwAKCRAQnapClxC3
+XU5mAPsEBeoFyK8ydXWIED658H907NAOasIDs3TG/yjYoqMKDwEA9pamRSpv95D0
+sgoXhPhot9sGj7A3X3mkS6jEvTJAkw8=
+=9HHy
 -----END PGP SIGNATURE-----

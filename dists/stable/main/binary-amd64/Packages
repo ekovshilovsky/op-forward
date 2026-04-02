@@ -1,12 +1,12 @@
 Package: op-forward
-Version: 0.6.0
+Version: 0.6.1
 Architecture: amd64
 Maintainer: Eugene Kovshilovsky <ekovshilovsky@users.noreply.github.com>
-Filename: pool/op-forward_0.6.0_amd64.deb
-Size: 2411730
-MD5sum: 5164365e46790b5aba66f133ad60365e
-SHA1: d6e94bd538f851cc48edcc53c7498224d599a727
-SHA256: 2e1f2f1175b157835ba31a8324f767e0afa5343c154bcff6d1d11c74f1f7f007
+Filename: pool/op-forward_0.6.1_amd64.deb
+Size: 2411696
+MD5sum: 2b9bdc7854213377b2a47b4ae3e0afb1
+SHA1: 0663dc18d955ca7025dd4e2e0289e5e6e231e5e4
+SHA256: e533ca340b95b6c2154d8298aa831f7e246ed2bd7768f9dd30244c97d365f6a3
 Section: utils
 Priority: optional
 Homepage: https://github.com/ekovshilovsky/op-forward
