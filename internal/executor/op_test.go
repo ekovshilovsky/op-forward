@@ -171,18 +171,30 @@ func TestDisableOutputPostProcessing_NoCarriageReturn(t *testing.T) {
 	// Verify that disableOutputPostProcessing prevents the PTY line
 	// discipline from converting \n to \r\n. Without this, output from
 	// op would contain \r\n which could corrupt JSON or binary data.
-	cmd := exec.Command("/bin/sh", "-c", "printf 'line1\nline2\n'")
-	cmd.SysProcAttr = newSysProcAttr()
-	ptmx, err := pty.Start(cmd)
+	//
+	// Open the PTY pair manually and disable OPOST before starting the
+	// command so that no output is produced with the default line discipline.
+	ptmx, pts, err := pty.Open()
 	if err != nil {
-		t.Fatalf("pty.Start() failed: %v", err)
+		t.Fatalf("pty.Open() failed: %v", err)
 	}
+	defer ptmx.Close()
 
 	disableOutputPostProcessing(ptmx)
 
+	cmd := exec.Command("/bin/sh", "-c", "printf 'line1\nline2\n'")
+	cmd.SysProcAttr = newSysProcAttr()
+	cmd.Stdin = pts
+	cmd.Stdout = pts
+	cmd.Stderr = pts
+	if err := cmd.Start(); err != nil {
+		pts.Close()
+		t.Fatalf("cmd.Start() failed: %v", err)
+	}
+	pts.Close()
+
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(ptmx)
-	_ = ptmx.Close()
 	_ = cmd.Wait()
 
 	output := buf.String()
