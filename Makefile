@@ -7,11 +7,14 @@ LDFLAGS := -s -w -X github.com/ekovshilovsky/op-forward/cmd.Version=$(VERSION)
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
+# CGO is disabled so Linux binaries are static and run on any distribution,
+# including musl-based ones such as Alpine.
+build-all: export CGO_ENABLED = 0
 build-all: clean
-	GOOS=darwin  GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_darwin_arm64/$(BINARY) .
-	GOOS=darwin  GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_darwin_amd64/$(BINARY) .
-	GOOS=linux   GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_linux_arm64/$(BINARY) .
-	GOOS=linux   GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_linux_amd64/$(BINARY) .
+	GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_darwin_arm64/$(BINARY) .
+	GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_darwin_amd64/$(BINARY) .
+	GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_linux_arm64/$(BINARY) .
+	GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_$(VERSION)_linux_amd64/$(BINARY) .
 	cd dist && for d in */; do tar -czf "$${d%/}.tar.gz" -C "$$d" $(BINARY); done
 
 test:
