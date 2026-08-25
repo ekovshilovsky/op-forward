@@ -6,14 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ekovshilovsky/op-forward/internal/auth"
+	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 	"github.com/ekovshilovsky/op-forward/internal/executor"
 )
 
@@ -34,17 +34,24 @@ const proxyExitInfraFailure = 127
 //  4. On failed refresh, print a clear error and exit.
 func runProxy() error {
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
-	port := fs.Int("port", getProxyPort(), "Daemon port")
-	host := fs.String("host", getProxyHost(), "Daemon host (set to host.docker.internal for Docker Desktop containers)")
+	addr := fs.String("addr", os.Getenv(endpoint.EnvAddr), "Daemon endpoint: tcp://host:port or unix:///path.sock (overrides --host/--port)")
+	port := fs.Int("port", endpoint.PortFromEnv(), "Daemon port")
+	host := fs.String("host", endpoint.HostFromEnv(), "Daemon host (set to host.docker.internal for Docker Desktop containers)")
 	timeoutMs := fs.Int("timeout", getProxyTimeout(), "Request timeout in milliseconds")
 	fs.Parse(os.Args[2:])
 
 	args := fs.Args()
 
+	ep, err := endpoint.ForDial(endpointArg(*addr, explicitFlags(fs), "host", "port"), *host, *port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "op-forward: %v\n", err)
+		os.Exit(proxyExitInfraFailure)
+	}
+
 	// Resolve token file paths.
-	accessPath := proxyTokenPath("access.token")
-	refreshPath := proxyTokenPath("refresh.token")
-	legacyPath := proxyTokenPath("session.token")
+	accessPath := proxyTokenPath(auth.AccessTokenFile)
+	refreshPath := proxyTokenPath(auth.RefreshTokenFile)
+	legacyPath := proxyTokenPath(auth.LegacyTokenFile)
 
 	// Read access token, with fallback to legacy session.token.
 	// Also check expiry so we can skip straight to refresh when stale.
@@ -61,14 +68,12 @@ func runProxy() error {
 		// Fall through — accessValid is false, will trigger refresh below.
 	}
 
-	// Probe daemon availability (fast TCP check).
-	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
-	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "op-forward: daemon not reachable at %s\n", addr)
+	// Probe daemon availability before building the request so a missing
+	// tunnel fails fast and the shim can fall back to the local op binary.
+	if err := ep.Probe(time.Duration(getProbeTimeoutMs()) * time.Millisecond); err != nil {
+		fmt.Fprintf(os.Stderr, "op-forward: daemon not reachable at %s\n", ep)
 		os.Exit(proxyExitInfraFailure)
 	}
-	conn.Close()
 
 	// Build the request body.
 	reqBody := executor.Request{
@@ -82,7 +87,7 @@ func runProxy() error {
 	}
 
 	httpTimeout := time.Duration(*timeoutMs)*time.Millisecond + 5*time.Second
-	client := &http.Client{Timeout: httpTimeout}
+	client := ep.HTTPClient(httpTimeout)
 
 	// If the access token is known-expired, skip directly to refresh
 	// instead of burning a round-trip to get a 401.
@@ -90,7 +95,7 @@ func runProxy() error {
 	var respBody []byte
 
 	if accessValid && accessToken != "" {
-		resp, respBody, err = executeWithAuth(client, addr, bodyBytes, accessToken)
+		resp, respBody, err = executeWithAuth(client, ep, bodyBytes, accessToken)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "op-forward: %v\n", err)
 			os.Exit(proxyExitInfraFailure)
@@ -113,7 +118,7 @@ func runProxy() error {
 			os.Exit(proxyExitInfraFailure)
 		}
 
-		newTokens, refreshErr := attemptRefresh(client, addr, refreshToken)
+		newTokens, refreshErr := attemptRefresh(client, ep, refreshToken)
 		if refreshErr != nil {
 			// Refresh failed — print actionable error and exit.
 			printRefreshFailedError(refreshErr)
@@ -125,7 +130,7 @@ func runProxy() error {
 		saveTokenFile(refreshPath, newTokens.RefreshToken, newTokens.RefreshExpires)
 
 		// Retry the original request with the new access token.
-		resp, respBody, err = executeWithAuth(client, addr, bodyBytes, newTokens.AccessToken)
+		resp, respBody, err = executeWithAuth(client, ep, bodyBytes, newTokens.AccessToken)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "op-forward: %v\n", err)
 			os.Exit(proxyExitInfraFailure)
@@ -170,8 +175,8 @@ func runProxy() error {
 }
 
 // executeWithAuth sends a POST to /op/execute with the given bearer token.
-func executeWithAuth(client *http.Client, addr string, body []byte, token string) (*http.Response, []byte, error) {
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/op/execute", addr), bytes.NewReader(body))
+func executeWithAuth(client *http.Client, ep endpoint.Endpoint, body []byte, token string) (*http.Response, []byte, error) {
+	req, err := http.NewRequest("POST", ep.BaseURL()+"/op/execute", bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -205,8 +210,8 @@ type tokenRefreshResponse struct {
 
 // attemptRefresh calls the daemon's /token/refresh endpoint with the given
 // refresh token and returns the new token pair on success.
-func attemptRefresh(client *http.Client, addr, refreshToken string) (*tokenRefreshResponse, error) {
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/token/refresh", addr), nil)
+func attemptRefresh(client *http.Client, ep endpoint.Endpoint, refreshToken string) (*tokenRefreshResponse, error) {
+	req, err := http.NewRequest("POST", ep.BaseURL()+"/token/refresh", nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating refresh request: %w", err)
 	}
@@ -243,21 +248,26 @@ func attemptRefresh(client *http.Client, addr, refreshToken string) (*tokenRefre
 // ---------- Token file helpers ----------
 
 // proxyTokenPath returns the path to a token file on the VM (proxy) side.
-// Uses os.UserCacheDir so the path is correct on both macOS
-// (~/Library/Caches) and Linux (~/.cache).
+// It delegates to the auth package so the proxy and the daemon resolve
+// OP_FORWARD_TOKEN_FILE / OP_FORWARD_TOKEN_DIR with identical precedence.
+// If the user cache directory cannot be determined, ~/.cache is used so the
+// proxy still has somewhere to persist refreshed tokens.
 func proxyTokenPath(filename string) string {
-	if path := os.Getenv("OP_FORWARD_TOKEN_FILE"); path != "" && filename == "access.token" {
+	var path string
+	var err error
+	switch filename {
+	case auth.AccessTokenFile:
+		path, err = auth.AccessTokenPath()
+	case auth.RefreshTokenFile:
+		path, err = auth.RefreshTokenPath()
+	default:
+		path, err = auth.LegacyTokenPath()
+	}
+	if err == nil {
 		return path
 	}
-	if dir := os.Getenv("OP_FORWARD_TOKEN_DIR"); dir != "" {
-		return filepath.Join(dir, filename)
-	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(cacheDir, "op-forward", filename)
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cache", auth.CacheDirName, filename)
 }
 
 // readTokenValue reads the first line (token value) from a token file.
@@ -326,34 +336,4 @@ func printRefreshFailedError(err error) {
 			"  scp host:~/Library/Caches/op-forward/refresh.token ~/.cache/op-forward/refresh.token\n\n"+
 			"This is NOT a 1Password authentication issue — it is the op-forward "+
 			"inter-VM session token that needs to be redeployed.\n", err)
-}
-
-// ---------- Config helpers ----------
-
-func getProxyPort() int {
-	if p := os.Getenv("OP_FORWARD_PORT"); p != "" {
-		if port, err := strconv.Atoi(p); err == nil {
-			return port
-		}
-	}
-	return DefaultPort
-}
-
-// getProxyHost returns the host the shim dials to reach the daemon. Defaults to
-// loopback; set OP_FORWARD_HOST to host.docker.internal to reach the host daemon
-// from a Docker Desktop container without an SSH reverse tunnel.
-func getProxyHost() string {
-	if h := os.Getenv("OP_FORWARD_HOST"); h != "" {
-		return h
-	}
-	return "127.0.0.1"
-}
-
-func getProxyTimeout() int {
-	if t := os.Getenv("OP_FORWARD_FETCH_TIMEOUT_MS"); t != "" {
-		if ms, err := strconv.Atoi(t); err == nil {
-			return ms
-		}
-	}
-	return 60000
 }

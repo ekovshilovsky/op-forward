@@ -57,7 +57,7 @@ op-forward serve
 op-forward service install
 ```
 
-The daemon listens on `127.0.0.1:18340` (loopback only) and generates a bearer token at `~/Library/Caches/op-forward/session.token`.
+The daemon listens on `tcp://127.0.0.1:18340` (loopback only) by default and generates bearer tokens under `~/Library/Caches/op-forward/`. To listen on a Unix domain socket instead, see [Transports](#transports).
 
 ### Set up the remote side (VM / Linux)
 
@@ -101,6 +101,38 @@ ssh -R 18340:127.0.0.1:18340 vm
 
 Now `op` commands inside the VM are forwarded to the host.
 
+### Unix socket instead of a port
+
+The daemon can listen on a Unix domain socket, and SSH can forward a socket
+the same way it forwards a port. This keeps the VM-side endpoint private to
+your user (the socket is `0600`) and avoids port collisions when several VMs
+share one host.
+
+```bash
+# Host: listen on a socket instead of a port
+export OP_FORWARD_LISTEN="unix://$HOME/Library/Caches/op-forward/op-forward.sock"
+op-forward serve        # or: op-forward service install (the endpoint is written into the plist)
+
+# Host: forward the socket into the VM (paths are expanded by the host shell,
+# so spell out the VM-side path explicitly)
+ssh -R /home/<vm-user>/.cache/op-forward/op-forward.sock:$HOME/Library/Caches/op-forward/op-forward.sock vm
+
+# VM: point the shim at the forwarded socket
+export OP_FORWARD_ADDR="unix://$HOME/.cache/op-forward/op-forward.sock"
+```
+
+Two things to know before choosing this mode:
+
+- `sshd` on the VM does not remove a forwarded socket when the connection
+  drops, so the next `ssh -R` fails with `bind: Address already in use`. Set
+  `StreamLocalBindUnlink yes` in the VM's `/etc/ssh/sshd_config` to have it
+  replaced automatically.
+- The socket's directory must be owned by you and mode `0700`; the daemon
+  refuses shared locations such as `/tmp`. `~/Library/Caches/op-forward` on
+  macOS and `$XDG_RUNTIME_DIR` on Linux both qualify.
+- Unix socket paths are limited to about 104 bytes on macOS; keep the host
+  socket path short.
+
 ### Docker Desktop containers (no SSH tunnel)
 
 For a local Docker Desktop container (e.g. a VS Code dev container) you don't need
@@ -115,23 +147,28 @@ op-forward install
 
 The daemon still binds loopback only; Docker Desktop routes `host.docker.internal`
 to the host, so no tunnel or extra proxy is needed.
+`OP_FORWARD_ADDR=tcp://host.docker.internal:18340` is the equivalent full form.
+Use TCP here: a host Unix socket cannot be bind-mounted into a Docker Desktop
+container (`docker run` fails at mount time with `operation not supported`).
 
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `OP_FORWARD_PORT` | `18340` | Daemon listen port |
-| `OP_FORWARD_HOST` | `127.0.0.1` | Host the shim dials to reach the daemon. Set to `host.docker.internal` to reach the host from a Docker Desktop container without an SSH tunnel. |
+| `OP_FORWARD_LISTEN` | `tcp://127.0.0.1:$OP_FORWARD_PORT` | Endpoint the daemon binds: `tcp://127.0.0.1:PORT` (loopback only) or `unix:///absolute/path.sock` |
+| `OP_FORWARD_ADDR` | `tcp://$OP_FORWARD_HOST:$OP_FORWARD_PORT` | Endpoint the shim dials: `tcp://host:port` or `unix:///absolute/path.sock`. Overrides `OP_FORWARD_HOST`/`OP_FORWARD_PORT` when set. |
+| `OP_FORWARD_PORT` | `18340` | TCP port shorthand, used by both sides when the full endpoint form above is unset |
+| `OP_FORWARD_HOST` | `127.0.0.1` | TCP host shorthand for the shim. Set to `host.docker.internal` to reach the host from a Docker Desktop container without an SSH tunnel. Never used by the daemon. |
 | `OP_FORWARD_TOKEN_DIR` | `~/Library/Caches/op-forward` (macOS) / `~/.cache/op-forward` (Linux) | Token storage directory |
 | `OP_FORWARD_TOKEN_FILE` | `$TOKEN_DIR/session.token` | Full path to token file |
-| `OP_FORWARD_PROBE_TIMEOUT_MS` | `500` | Shim TCP probe timeout |
+| `OP_FORWARD_PROBE_TIMEOUT_MS` | `500` | How long the shim waits for the daemon to accept a connection before falling back to the local `op` |
 | `OP_FORWARD_FETCH_TIMEOUT_MS` | `60000` | Shim HTTP request timeout |
 
 ## Commands
 
 ```
-op-forward serve [--port PORT]    Start the host daemon
-op-forward install [--port PORT]  Install the op shim on the remote side
+op-forward serve [--listen EP]    Start the host daemon (EP: tcp://127.0.0.1:PORT or unix:///path.sock)
+op-forward install                Install the op shim on the remote side
 op-forward service install        Install as a launchd daemon (macOS)
 op-forward service uninstall      Remove the launchd daemon
 op-forward update                 Update to the latest release
@@ -146,7 +183,7 @@ op-forward is designed for environments where the host is trusted and the remote
 
 Additional layers:
 
-- **Loopback-only binding**: The daemon hard-codes `127.0.0.1` and refuses to bind to any non-loopback address. It is unreachable from the network.
+- **Local-only binding**: TCP endpoints must be loopback; the daemon refuses to bind anything else, so it is unreachable from the network. Unix socket endpoints are created `0600` inside a `0700` directory, and the daemon additionally checks the connecting process's uid (`SO_PEERCRED` / `LOCAL_PEERCRED`) and refuses other users even if the socket file is exposed.
 - **Bearer token authentication**: A 32-byte random hex token with 30-day sliding expiry. Generated on first run, stored with 0600 permissions.
 - **No shell execution**: Commands are executed via `os/exec` (direct exec), not through a shell. Shell injection is structurally impossible.
 - **Argument sanitization**: Arguments containing shell metacharacters (`` ` ``, `$`, `|`, `;`, `&`, newlines) are rejected before execution.
@@ -159,6 +196,17 @@ Additional layers:
 - If Touch ID is configured to not require approval for every `op` invocation (unusual but possible), the proxy would execute commands without biometric gates.
 
 The threat model assumes: SSH tunnels are secure, the host machine is not compromised, and Touch ID provides the authorization boundary.
+
+## Transports
+
+Both sides accept a single endpoint value that selects the transport:
+
+| Form | Reachable by | Use when |
+|---|---|---|
+| `tcp://127.0.0.1:18340` (default) | SSH port forwarding (`ssh -R 18340:127.0.0.1:18340`), Docker Desktop's `host.docker.internal` | Standard setups; Docker Desktop containers (a host Unix socket cannot be bind-mounted into the container, so `unix://` cannot serve them) |
+| `unix:///absolute/path.sock` | SSH socket forwarding (`ssh -R remote.sock:local.sock`) | You want the VM-side endpoint private to your user, or several VMs would otherwise fight over one port |
+
+The HTTP protocol, bearer tokens, and command validation are identical over both transports.
 
 ## Use with VMs (Colima, Lima, etc.)
 
