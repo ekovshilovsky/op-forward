@@ -127,9 +127,11 @@ Two things to know before choosing this mode:
   drops, so the next `ssh -R` fails with `bind: Address already in use`. Set
   `StreamLocalBindUnlink yes` in the VM's `/etc/ssh/sshd_config` to have it
   replaced automatically.
+- The socket's directory must be owned by you and mode `0700`; the daemon
+  refuses shared locations such as `/tmp`. `~/Library/Caches/op-forward` on
+  macOS and `$XDG_RUNTIME_DIR` on Linux both qualify.
 - Unix socket paths are limited to about 104 bytes on macOS; keep the host
-  socket path short. `OP_FORWARD_LISTEN` may also point at
-  `$XDG_RUNTIME_DIR` on Linux hosts.
+  socket path short.
 
 ### Docker Desktop containers (no SSH tunnel)
 

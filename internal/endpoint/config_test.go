@@ -2,100 +2,79 @@ package endpoint
 
 import "testing"
 
-func clearEnv(t *testing.T) {
-	t.Helper()
-	for _, k := range []string{"OP_FORWARD_ADDR", "OP_FORWARD_LISTEN", "OP_FORWARD_HOST", "OP_FORWARD_PORT"} {
-		t.Setenv(k, "")
-	}
-}
-
-func TestDialFromEnvDefaultsToLoopbackTCP(t *testing.T) {
-	clearEnv(t)
-	ep, err := DialFromEnv()
+func TestForDialUsesHostAndPortWhenAddrEmpty(t *testing.T) {
+	ep, err := ForDial("", "host.docker.internal", 20000)
 	if err != nil {
-		t.Fatalf("DialFromEnv() error: %v", err)
-	}
-	if got := ep.String(); got != "tcp://127.0.0.1:18340" {
-		t.Fatalf("DialFromEnv() = %q", got)
-	}
-}
-
-func TestDialFromEnvHonorsHostAndPortAliases(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("OP_FORWARD_HOST", "host.docker.internal")
-	t.Setenv("OP_FORWARD_PORT", "20000")
-	ep, err := DialFromEnv()
-	if err != nil {
-		t.Fatalf("DialFromEnv() error: %v", err)
+		t.Fatal(err)
 	}
 	if got := ep.String(); got != "tcp://host.docker.internal:20000" {
-		t.Fatalf("DialFromEnv() = %q", got)
+		t.Fatalf("ForDial() = %q", got)
 	}
 }
 
-func TestDialFromEnvAddrOverridesAliases(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("OP_FORWARD_HOST", "host.docker.internal")
-	t.Setenv("OP_FORWARD_ADDR", "unix:///run/op-forward.sock")
-	ep, err := DialFromEnv()
+func TestForDialAddrWins(t *testing.T) {
+	ep, err := ForDial("unix:///run/op-forward.sock", "host.docker.internal", 20000)
 	if err != nil {
-		t.Fatalf("DialFromEnv() error: %v", err)
+		t.Fatal(err)
 	}
 	if got := ep.String(); got != "unix:///run/op-forward.sock" {
-		t.Fatalf("DialFromEnv() = %q", got)
+		t.Fatalf("ForDial() = %q", got)
 	}
 }
 
-func TestDialFromEnvRejectsMalformedAddr(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("OP_FORWARD_ADDR", "127.0.0.1:18340")
-	if _, err := DialFromEnv(); err == nil {
-		t.Fatal("DialFromEnv() accepted an address without a scheme")
+func TestForDialRejectsMalformedAddr(t *testing.T) {
+	if _, err := ForDial("127.0.0.1:18340", "h", 1); err == nil {
+		t.Fatal("ForDial() accepted an address without a scheme")
 	}
 }
 
-func TestListenFromEnvDefaultsToLoopbackTCP(t *testing.T) {
-	clearEnv(t)
-	ep, err := ListenFromEnv()
+func TestForListenDefaultsToLoopbackTCP(t *testing.T) {
+	ep, err := ForListen("", 20000)
 	if err != nil {
-		t.Fatalf("ListenFromEnv() error: %v", err)
-	}
-	if got := ep.String(); got != "tcp://127.0.0.1:18340" {
-		t.Fatalf("ListenFromEnv() = %q", got)
-	}
-}
-
-func TestListenFromEnvIgnoresHostAlias(t *testing.T) {
-	// OP_FORWARD_HOST is a client-side dial target. The daemon must keep
-	// binding loopback even when the same environment is shared by both.
-	clearEnv(t)
-	t.Setenv("OP_FORWARD_HOST", "host.docker.internal")
-	t.Setenv("OP_FORWARD_PORT", "20000")
-	ep, err := ListenFromEnv()
-	if err != nil {
-		t.Fatalf("ListenFromEnv() error: %v", err)
+		t.Fatal(err)
 	}
 	if got := ep.String(); got != "tcp://127.0.0.1:20000" {
-		t.Fatalf("ListenFromEnv() = %q", got)
+		t.Fatalf("ForListen() = %q", got)
 	}
 }
 
-func TestListenFromEnvHonorsListen(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("OP_FORWARD_LISTEN", "unix:///run/op-forward.sock")
-	ep, err := ListenFromEnv()
+func TestForListenExplicitWins(t *testing.T) {
+	ep, err := ForListen("unix:///run/op-forward.sock", 20000)
 	if err != nil {
-		t.Fatalf("ListenFromEnv() error: %v", err)
+		t.Fatal(err)
 	}
 	if got := ep.String(); got != "unix:///run/op-forward.sock" {
-		t.Fatalf("ListenFromEnv() = %q", got)
+		t.Fatalf("ForListen() = %q", got)
 	}
 }
 
-func TestPortFromEnvFallsBackOnGarbage(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("OP_FORWARD_PORT", "not-a-port")
-	if got := PortFromEnv(); got != DefaultPort {
-		t.Fatalf("PortFromEnv() = %d, want %d", got, DefaultPort)
+func TestIntFromEnv(t *testing.T) {
+	const key = "OP_FORWARD_TEST_INT"
+	cases := map[string]int{"": 7, "12": 12, "garbage": 7, "0": 7, "-3": 7, "1": 1}
+	for raw, want := range cases {
+		t.Setenv(key, raw)
+		if got := IntFromEnv(key, 7, 1); got != want {
+			t.Errorf("IntFromEnv(%q) = %d, want %d", raw, got, want)
+		}
+	}
+}
+
+func TestPortFromEnvRejectsZeroAndGarbage(t *testing.T) {
+	for _, raw := range []string{"not-a-port", "0", "-1"} {
+		t.Setenv(EnvPort, raw)
+		if got := PortFromEnv(); got != DefaultPort {
+			t.Errorf("PortFromEnv() with %q = %d, want %d", raw, got, DefaultPort)
+		}
+	}
+}
+
+func TestHostFromEnv(t *testing.T) {
+	t.Setenv(EnvHost, "")
+	if got := HostFromEnv(); got != DefaultHost {
+		t.Fatalf("HostFromEnv() default = %q", got)
+	}
+	t.Setenv(EnvHost, "host.docker.internal")
+	if got := HostFromEnv(); got != "host.docker.internal" {
+		t.Fatalf("HostFromEnv() = %q", got)
 	}
 }

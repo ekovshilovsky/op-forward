@@ -1,53 +1,49 @@
 package cmd
 
 import (
-	"os"
-	"strconv"
+	"flag"
 
 	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 )
 
-// resolveDialEndpoint picks the daemon address the proxy connects to. An
-// explicit endpoint (--addr / OP_FORWARD_ADDR) wins; otherwise the host and
-// port shorthand (--host / OP_FORWARD_HOST, --port / OP_FORWARD_PORT) is
-// combined into a TCP endpoint.
-func resolveDialEndpoint(addr, host string, port int) (endpoint.Endpoint, error) {
-	if addr != "" {
-		return endpoint.Parse(addr)
-	}
-	return endpoint.TCP(host, port), nil
+// explicitFlags returns the names of the flags the user actually typed, as
+// opposed to those holding their defaults.
+func explicitFlags(fs *flag.FlagSet) map[string]bool {
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	return set
 }
 
-// resolveListenEndpoint picks the address the daemon binds. An explicit
-// endpoint (--listen / OP_FORWARD_LISTEN) wins; otherwise the daemon binds
-// loopback TCP on the given port. There is intentionally no host shorthand
-// on the listen side: the daemon must not be reachable off the machine.
-func resolveListenEndpoint(listen string, port int) (endpoint.Endpoint, error) {
-	if listen != "" {
-		return endpoint.Parse(listen)
+// endpointArg decides whether a full endpoint string should be used or
+// discarded in favor of its shorthand aliases (--host/--port for the proxy,
+// --port for the daemon). The endpoint flag's default is read from the
+// environment, so without this rule an OP_FORWARD_ADDR exported in a shell
+// profile would silently override a --host the user typed on the command
+// line. Precedence is: typed endpoint > typed alias > environment endpoint
+// > environment alias.
+func endpointArg(value string, explicit map[string]bool, aliases ...string) string {
+	if explicit["addr"] || explicit["listen"] {
+		return value
 	}
-	return endpoint.TCP(endpoint.DefaultHost, port), nil
+	for _, alias := range aliases {
+		if explicit[alias] {
+			return ""
+		}
+	}
+	return value
 }
 
 // getProbeTimeoutMs returns how long the proxy waits for the daemon to accept
 // a connection before declaring the tunnel down and letting the shim fall
-// back to the local op binary. Controlled by OP_FORWARD_PROBE_TIMEOUT_MS.
+// back to the local op binary. Controlled by OP_FORWARD_PROBE_TIMEOUT_MS. A
+// zero value would mean "no timeout" to the dialer and defeat the fallback,
+// so non-positive values revert to the default.
 func getProbeTimeoutMs() int {
-	if t := os.Getenv("OP_FORWARD_PROBE_TIMEOUT_MS"); t != "" {
-		if ms, err := strconv.Atoi(t); err == nil {
-			return ms
-		}
-	}
-	return 500
+	return endpoint.IntFromEnv("OP_FORWARD_PROBE_TIMEOUT_MS", 500, 1)
 }
 
 // getProxyTimeout returns the per-request execution timeout in milliseconds,
 // controlled by OP_FORWARD_FETCH_TIMEOUT_MS.
 func getProxyTimeout() int {
-	if t := os.Getenv("OP_FORWARD_FETCH_TIMEOUT_MS"); t != "" {
-		if ms, err := strconv.Atoi(t); err == nil {
-			return ms
-		}
-	}
-	return 60000
+	return endpoint.IntFromEnv("OP_FORWARD_FETCH_TIMEOUT_MS", 60000, 1)
 }

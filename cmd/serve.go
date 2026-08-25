@@ -16,7 +16,7 @@ func runServe() error {
 	port := fs.Int("port", endpoint.PortFromEnv(), "Loopback TCP port to listen on")
 	fs.Parse(os.Args[2:])
 
-	ep, err := resolveListenEndpoint(*listen, *port)
+	ep, err := endpoint.ForListen(endpointArg(*listen, explicitFlags(fs), "port"), *port)
 	if err != nil {
 		return err
 	}

@@ -49,7 +49,7 @@ func TestExecute_RejectsForeignPeerUID(t *testing.T) {
 	req = req.WithContext(withPeerUID(req.Context(), os.Getuid()+1))
 	w := httptest.NewRecorder()
 
-	srv.handleExecute(w, req)
+	srv.handler().ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 for foreign peer uid", w.Code)
@@ -63,7 +63,7 @@ func TestTokenRefresh_RejectsForeignPeerUID(t *testing.T) {
 	req = req.WithContext(withPeerUID(req.Context(), os.Getuid()+1))
 	w := httptest.NewRecorder()
 
-	srv.handleTokenRefresh(w, req)
+	srv.handler().ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 for foreign peer uid", w.Code)
@@ -78,9 +78,22 @@ func TestExecute_AllowsOwnPeerUID(t *testing.T) {
 	req = req.WithContext(withPeerUID(req.Context(), os.Getuid()))
 	w := httptest.NewRecorder()
 
-	srv.handleExecute(w, req)
+	srv.handler().ServeHTTP(w, req)
 
 	if w.Code == http.StatusForbidden {
 		t.Fatal("own uid was rejected by the peer credential check")
+	}
+}
+
+func TestHealth_RejectsForeignPeerUID(t *testing.T) {
+	srv, _, _ := newTestServer()
+	req := httptest.NewRequest("GET", "/health", nil)
+	req = req.WithContext(withPeerUID(req.Context(), os.Getuid()+1))
+	w := httptest.NewRecorder()
+
+	srv.handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: the peer check must cover every route, not selected handlers", w.Code)
 	}
 }

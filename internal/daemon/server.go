@@ -58,15 +58,10 @@ func (s *Server) Start() error {
 
 // Serve runs the HTTP daemon on an already-open listener. Peer credentials
 // are captured once per connection and carried in the request context so
-// the authenticated handlers can refuse callers running as a different user.
+// the peer check in handler() can refuse callers running as a different user.
 func (s *Server) Serve(ln net.Listener) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/op/execute", s.handleExecute)
-	mux.HandleFunc("/token/refresh", s.handleTokenRefresh)
-
 	server := &http.Server{
-		Handler:      mux,
+		Handler:      s.handler(),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: executor.MaxTimeout + 10*time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -88,18 +83,30 @@ func withPeerUID(ctx context.Context, uid int) context.Context {
 	return context.WithValue(ctx, peerUIDKey{}, uid)
 }
 
-// rejectForeignPeer writes 403 and returns true when the connection carries
-// peer credentials for a user other than the one running the daemon. When no
+// handler builds the route table and wraps it in the peer check, so every
+// route, present and future, is covered without each handler having to
+// remember to call it.
+func (s *Server) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/op/execute", s.handleExecute)
+	mux.HandleFunc("/token/refresh", s.handleTokenRefresh)
+	return rejectForeignPeer(mux)
+}
+
+// rejectForeignPeer refuses requests whose connection carries peer
+// credentials for a user other than the one running the daemon. When no
 // credentials are available (TCP, or an unsupported platform) the request
 // proceeds to the bearer token check, which remains the primary gate.
-func rejectForeignPeer(w http.ResponseWriter, r *http.Request) bool {
-	uid, ok := r.Context().Value(peerUIDKey{}).(int)
-	if !ok || uid == os.Getuid() {
-		return false
-	}
-	log.Printf("[op-forward] refused connection from uid %d (daemon runs as uid %d)", uid, os.Getuid())
-	http.Error(w, "forbidden", http.StatusForbidden)
-	return true
+func rejectForeignPeer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if uid, ok := r.Context().Value(peerUIDKey{}).(int); ok && uid != os.Getuid() {
+			log.Printf("[op-forward] refused connection from uid %d (daemon runs as uid %d)", uid, os.Getuid())
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // handleHealth returns a simple health check (no auth required).
@@ -112,9 +119,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleExecute runs an op command and returns the result.
 func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
-	if rejectForeignPeer(w, r) {
-		return
-	}
 	// Verify HTTP method
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -183,9 +187,6 @@ type TokenRefreshResponse struct {
 // access token, rotates the refresh token, and returns both. This enables
 // the proxy to self-heal after a daemon restart without manual redeployment.
 func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
-	if rejectForeignPeer(w, r) {
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

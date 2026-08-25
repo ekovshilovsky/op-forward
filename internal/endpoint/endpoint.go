@@ -83,8 +83,10 @@ func (e Endpoint) BaseURL() string {
 }
 
 // IsLoopback reports whether the endpoint is reachable only from the local
-// machine. Unix sockets are local by construction; TCP endpoints qualify only
-// when the host is a loopback address or the literal "localhost".
+// machine. Unix sockets are local by construction. TCP endpoints qualify only
+// when the host is a loopback IP literal: a name such as "localhost" is
+// resolved by whatever the system resolver says, which can be a routable
+// address, so names are never trusted for the bind decision.
 func (e Endpoint) IsLoopback() bool {
 	if e.Network == "unix" {
 		return true
@@ -92,9 +94,6 @@ func (e Endpoint) IsLoopback() bool {
 	host, _, err := net.SplitHostPort(e.Address)
 	if err != nil {
 		return false
-	}
-	if host == "localhost" {
-		return true
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()

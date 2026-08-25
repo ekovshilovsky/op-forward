@@ -16,9 +16,28 @@ func TestGetProbeTimeoutMs(t *testing.T) {
 	if got := getProbeTimeoutMs(); got != 1200 {
 		t.Fatalf("probe timeout = %d, want 1200", got)
 	}
-	t.Setenv("OP_FORWARD_PROBE_TIMEOUT_MS", "soon")
-	if got := getProbeTimeoutMs(); got != 500 {
-		t.Fatalf("probe timeout with garbage = %d, want 500", got)
+	for _, raw := range []string{"soon", "0", "-5"} {
+		t.Setenv("OP_FORWARD_PROBE_TIMEOUT_MS", raw)
+		if got := getProbeTimeoutMs(); got != 500 {
+			t.Fatalf("probe timeout with %q = %d, want 500 (a zero timeout would disable the shim fallback)", raw, got)
+		}
+	}
+}
+
+// Explicitly typed --host/--port must beat an OP_FORWARD_ADDR inherited from
+// the environment, while an explicitly typed --addr beats everything.
+func TestEndpointArgPrecedence(t *testing.T) {
+	envOnly := map[string]bool{}
+	if got := endpointArg("unix:///env.sock", envOnly, "host", "port"); got != "unix:///env.sock" {
+		t.Fatalf("env addr with no explicit flags = %q, want env addr", got)
+	}
+	hostTyped := map[string]bool{"host": true}
+	if got := endpointArg("unix:///env.sock", hostTyped, "host", "port"); got != "" {
+		t.Fatalf("explicit --host should discard env addr, got %q", got)
+	}
+	bothTyped := map[string]bool{"addr": true, "host": true}
+	if got := endpointArg("unix:///typed.sock", bothTyped, "host", "port"); got != "unix:///typed.sock" {
+		t.Fatalf("explicit --addr must win, got %q", got)
 	}
 }
 
@@ -54,44 +73,5 @@ func TestProxyTokenPathFileOverrideOnlyAppliesToAccess(t *testing.T) {
 	}
 	if got := proxyTokenPath(auth.RefreshTokenFile); got != filepath.Join(dir, auth.RefreshTokenFile) {
 		t.Fatalf("refresh path = %q, must not follow OP_FORWARD_TOKEN_FILE", got)
-	}
-}
-
-func TestResolveDialEndpoint(t *testing.T) {
-	ep, err := resolveDialEndpoint("", "host.docker.internal", 18340)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ep.String(); got != "tcp://host.docker.internal:18340" {
-		t.Fatalf("host/port form = %q", got)
-	}
-
-	ep, err = resolveDialEndpoint("unix:///run/op-forward.sock", "host.docker.internal", 18340)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ep.String(); got != "unix:///run/op-forward.sock" {
-		t.Fatalf("--addr must win over host/port, got %q", got)
-	}
-
-	if _, err := resolveDialEndpoint("nonsense", "h", 1); err == nil {
-		t.Fatal("malformed --addr accepted")
-	}
-}
-
-func TestResolveListenEndpoint(t *testing.T) {
-	ep, err := resolveListenEndpoint("", 20000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ep.String(); got != "tcp://127.0.0.1:20000" {
-		t.Fatalf("port form = %q, want loopback tcp", got)
-	}
-	ep, err = resolveListenEndpoint("unix:///run/op-forward.sock", 20000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ep.String(); got != "unix:///run/op-forward.sock" {
-		t.Fatalf("--listen must win over --port, got %q", got)
 	}
 }

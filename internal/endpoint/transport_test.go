@@ -148,3 +148,33 @@ func TestProbeFailsWhenNothingListens(t *testing.T) {
 		t.Fatal("Probe() succeeded on absent socket")
 	}
 }
+
+func TestListenUnixRefusesToReplaceRegularFile(t *testing.T) {
+	path := shortSocketPath(t)
+	if err := os.WriteFile(path, []byte("refresh-token-material\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ep := Endpoint{Network: "unix", Address: path}
+
+	_, err := ep.Listen()
+	if err == nil || !strings.Contains(err.Error(), "not a socket") {
+		t.Fatalf("Listen() error = %v, want refusal naming a non-socket", err)
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != "refresh-token-material\n" {
+		t.Fatalf("regular file at socket path was altered: %v %q", readErr, data)
+	}
+}
+
+func TestListenUnixRefusesSharedDirectory(t *testing.T) {
+	path := shortSocketPath(t)
+	if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ep := Endpoint{Network: "unix", Address: path}
+
+	_, err := ep.Listen()
+	if err == nil || !strings.Contains(err.Error(), "0700") {
+		t.Fatalf("Listen() error = %v, want refusal citing 0700", err)
+	}
+}

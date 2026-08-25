@@ -42,7 +42,7 @@ func runProxy() error {
 
 	args := fs.Args()
 
-	ep, err := resolveDialEndpoint(*addr, *host, *port)
+	ep, err := endpoint.ForDial(endpointArg(*addr, explicitFlags(fs), "host", "port"), *host, *port)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "op-forward: %v\n", err)
 		os.Exit(proxyExitInfraFailure)

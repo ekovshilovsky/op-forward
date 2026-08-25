@@ -23,14 +23,25 @@ const (
 	EnvPort   = "OP_FORWARD_PORT"
 )
 
+// IntFromEnv reads an integer setting, returning def when the variable is
+// unset, not a number, or below min. Every numeric knob in op-forward is a
+// port or a duration, for which zero and negative values are never what the
+// operator meant, so they fall back to the default instead of being applied.
+func IntFromEnv(key string, def, min int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < min {
+		return def
+	}
+	return v
+}
+
 // PortFromEnv returns OP_FORWARD_PORT, or DefaultPort when unset or invalid.
 func PortFromEnv() int {
-	if p := os.Getenv(EnvPort); p != "" {
-		if port, err := strconv.Atoi(p); err == nil {
-			return port
-		}
-	}
-	return DefaultPort
+	return IntFromEnv(EnvPort, DefaultPort, 1)
 }
 
 // HostFromEnv returns OP_FORWARD_HOST, or DefaultHost when unset. Setting it
@@ -43,24 +54,24 @@ func HostFromEnv() string {
 	return DefaultHost
 }
 
-// DialFromEnv resolves the endpoint the proxy connects to:
-// OP_FORWARD_ADDR if set, otherwise tcp://$OP_FORWARD_HOST:$OP_FORWARD_PORT.
-func DialFromEnv() (Endpoint, error) {
-	if raw := os.Getenv(EnvAddr); raw != "" {
-		return Parse(raw)
+// ForDial resolves the endpoint the proxy connects to. A full endpoint
+// string (from --addr or OP_FORWARD_ADDR) wins; otherwise host and port are
+// combined into a TCP endpoint.
+func ForDial(addr, host string, port int) (Endpoint, error) {
+	if addr != "" {
+		return Parse(addr)
 	}
-	return TCP(HostFromEnv(), PortFromEnv()), nil
+	return TCP(host, port), nil
 }
 
-// ListenFromEnv resolves the endpoint the daemon binds:
-// OP_FORWARD_LISTEN if set, otherwise tcp://127.0.0.1:$OP_FORWARD_PORT.
-//
-// OP_FORWARD_HOST is deliberately not consulted here. It names where a
-// client should dial, which may be a Docker Desktop alias for the host; the
-// daemon itself must stay on loopback.
-func ListenFromEnv() (Endpoint, error) {
-	if raw := os.Getenv(EnvListen); raw != "" {
-		return Parse(raw)
+// ForListen resolves the endpoint the daemon binds. A full endpoint string
+// (from --listen or OP_FORWARD_LISTEN) wins; otherwise the daemon binds
+// loopback TCP on port. There is intentionally no host parameter: the
+// daemon must never be reachable off the machine, so OP_FORWARD_HOST, which
+// names where a client dials, is not consulted here.
+func ForListen(listen string, port int) (Endpoint, error) {
+	if listen != "" {
+		return Parse(listen)
 	}
-	return TCP(DefaultHost, PortFromEnv()), nil
+	return TCP(DefaultHost, port), nil
 }

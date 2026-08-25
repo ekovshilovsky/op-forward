@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -45,6 +47,20 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `
 
+// renderPlist fills the launchd template, escaping every operator-supplied
+// value for XML. The listen endpoint and the paths can legitimately contain
+// characters such as "&" that would otherwise corrupt the plist and leave a
+// broken LaunchAgent behind.
+func renderPlist(label, binPath, listen, home, logPath string) string {
+	return fmt.Sprintf(plistTemplate, xmlText(label), xmlText(binPath), xmlText(listen), xmlText(home), xmlText(logPath), xmlText(logPath))
+}
+
+func xmlText(s string) string {
+	var buf bytes.Buffer
+	xml.EscapeText(&buf, []byte(s))
+	return buf.String()
+}
+
 func runService() error {
 	if len(os.Args) < 3 {
 		fmt.Println("Usage: op-forward service [install|uninstall]")
@@ -83,7 +99,7 @@ func serviceInstall() error {
 
 	// The endpoint is resolved now and written into the plist, because
 	// launchd does not inherit the installing shell's environment.
-	ep, err := endpoint.ListenFromEnv()
+	ep, err := endpoint.ForListen(os.Getenv(endpoint.EnvListen), endpoint.PortFromEnv())
 	if err != nil {
 		return err
 	}
@@ -96,7 +112,7 @@ func serviceInstall() error {
 		return fmt.Errorf("creating LaunchAgents directory: %w", err)
 	}
 
-	plist := fmt.Sprintf(plistTemplate, launchdLabel, binPath, ep.String(), home, logPath, logPath)
+	plist := renderPlist(launchdLabel, binPath, ep.String(), home, logPath)
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		return fmt.Errorf("writing plist: %w", err)
 	}

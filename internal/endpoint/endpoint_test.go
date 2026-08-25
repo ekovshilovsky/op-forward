@@ -85,14 +85,16 @@ func TestBaseURL(t *testing.T) {
 }
 
 func TestIsLoopback(t *testing.T) {
-	loop := []string{"tcp://127.0.0.1:1", "tcp://[::1]:1", "tcp://localhost:1", "tcp://127.1.2.3:1", "unix:///tmp/x.sock"}
+	loop := []string{"tcp://127.0.0.1:1", "tcp://[::1]:1", "tcp://127.1.2.3:1", "unix:///tmp/x.sock"}
 	for _, raw := range loop {
 		ep, _ := Parse(raw)
 		if !ep.IsLoopback() {
 			t.Errorf("IsLoopback(%q) = false, want true", raw)
 		}
 	}
-	notLoop := []string{"tcp://0.0.0.0:1", "tcp://[::]:1", "tcp://host.docker.internal:1", "tcp://10.0.0.1:1"}
+	// "localhost" is a name, not an address; a resolver can map it anywhere,
+	// so only IP literals count as loopback for binding purposes.
+	notLoop := []string{"tcp://0.0.0.0:1", "tcp://[::]:1", "tcp://host.docker.internal:1", "tcp://10.0.0.1:1", "tcp://localhost:1"}
 	for _, raw := range notLoop {
 		ep, _ := Parse(raw)
 		if ep.IsLoopback() {
