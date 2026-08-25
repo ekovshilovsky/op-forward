@@ -4,18 +4,22 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/ekovshilovsky/op-forward/internal/auth"
 	"github.com/ekovshilovsky/op-forward/internal/daemon"
+	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 )
-
-const DefaultPort = 18340
 
 func runServe() error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	port := fs.Int("port", getPort(), "Port to listen on")
+	listen := fs.String("listen", os.Getenv(endpoint.EnvListen), "Listen endpoint: tcp://127.0.0.1:port or unix:///path.sock (overrides --port)")
+	port := fs.Int("port", endpoint.PortFromEnv(), "Loopback TCP port to listen on")
 	fs.Parse(os.Args[2:])
+
+	ep, err := resolveListenEndpoint(*listen, *port)
+	if err != nil {
+		return err
+	}
 
 	// Migrate legacy session.token → refresh.token if upgrading from the
 	// single-token system.
@@ -54,17 +58,8 @@ func runServe() error {
 		auth.SaveToPath(accessToken, legacyPath)
 	}
 
-	fmt.Printf("Starting daemon on 127.0.0.1:%d\n", *port)
+	fmt.Printf("Starting daemon on %s\n", ep)
 
-	server := daemon.New(accessToken, refreshToken, *port, Version)
+	server := daemon.New(accessToken, refreshToken, ep, Version)
 	return server.Start()
-}
-
-func getPort() int {
-	if p := os.Getenv("OP_FORWARD_PORT"); p != "" {
-		if port, err := strconv.Atoi(p); err == nil {
-			return port
-		}
-	}
-	return DefaultPort
 }

@@ -7,7 +7,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"strconv"
+
+	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 )
 
 const launchdLabel = "com.op-forward.daemon"
@@ -22,8 +23,8 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <array>
         <string>%s</string>
         <string>serve</string>
-        <string>--port</string>
-        <string>%d</string>
+        <string>--listen</string>
+        <string>%s</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -80,11 +81,11 @@ func serviceInstall() error {
 		return fmt.Errorf("resolving binary path: %w", err)
 	}
 
-	port := DefaultPort
-	if p := os.Getenv("OP_FORWARD_PORT"); p != "" {
-		if parsed, err := strconv.Atoi(p); err == nil {
-			port = parsed
-		}
+	// The endpoint is resolved now and written into the plist, because
+	// launchd does not inherit the installing shell's environment.
+	ep, err := endpoint.ListenFromEnv()
+	if err != nil {
+		return err
 	}
 
 	logPath := filepath.Join(home, "Library", "Logs", "op-forward.log")
@@ -95,7 +96,7 @@ func serviceInstall() error {
 		return fmt.Errorf("creating LaunchAgents directory: %w", err)
 	}
 
-	plist := fmt.Sprintf(plistTemplate, launchdLabel, binPath, port, home, logPath, logPath)
+	plist := fmt.Sprintf(plistTemplate, launchdLabel, binPath, ep.String(), home, logPath, logPath)
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		return fmt.Errorf("writing plist: %w", err)
 	}

@@ -6,8 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
+
+	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 )
 
 // shimTemplate is the op wrapper script installed on the remote side.
@@ -43,7 +44,10 @@ exit 1
 
 func runInstall() error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
-	_ = fs.Int("port", getInstallPort(), "Daemon port (stored in shim for legacy compat)")
+	// The shim reads OP_FORWARD_ADDR / OP_FORWARD_HOST / OP_FORWARD_PORT at
+	// run time, so nothing is baked in here. --port is accepted for scripts
+	// that still pass it.
+	_ = fs.Int("port", endpoint.PortFromEnv(), "Accepted for backward compatibility; the shim reads the environment at run time")
 	fs.Parse(os.Args[2:])
 
 	// Find the real op binary (before our shim shadows it)
@@ -108,13 +112,4 @@ func findRealOp() string {
 		}
 	}
 	return "/usr/bin/op" // Default fallback
-}
-
-func getInstallPort() int {
-	if p := os.Getenv("OP_FORWARD_PORT"); p != "" {
-		if port, err := strconv.Atoi(p); err == nil {
-			return port
-		}
-	}
-	return DefaultPort
 }
