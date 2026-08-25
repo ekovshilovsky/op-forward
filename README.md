@@ -147,6 +147,9 @@ op-forward install
 
 The daemon still binds loopback only; Docker Desktop routes `host.docker.internal`
 to the host, so no tunnel or extra proxy is needed.
+`OP_FORWARD_ADDR=tcp://host.docker.internal:18340` is the equivalent full form.
+Use TCP here: a host Unix socket cannot be bind-mounted into a Docker Desktop
+container (`docker run` fails at mount time with `operation not supported`).
 
 ## Configuration
 
@@ -200,7 +203,7 @@ Both sides accept a single endpoint value that selects the transport:
 
 | Form | Reachable by | Use when |
 |---|---|---|
-| `tcp://127.0.0.1:18340` (default) | SSH port forwarding (`ssh -R 18340:127.0.0.1:18340`), Docker Desktop's `host.docker.internal` | Standard setups; Docker Desktop containers (Unix sockets do not cross the Docker Desktop VM boundary) |
+| `tcp://127.0.0.1:18340` (default) | SSH port forwarding (`ssh -R 18340:127.0.0.1:18340`), Docker Desktop's `host.docker.internal` | Standard setups; Docker Desktop containers (a host Unix socket cannot be bind-mounted into the container, so `unix://` cannot serve them) |
 | `unix:///absolute/path.sock` | SSH socket forwarding (`ssh -R remote.sock:local.sock`) | You want the VM-side endpoint private to your user, or several VMs would otherwise fight over one port |
 
 The HTTP protocol, bearer tokens, and command validation are identical over both transports.
