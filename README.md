@@ -101,11 +101,27 @@ ssh -R 18340:127.0.0.1:18340 vm
 
 Now `op` commands inside the VM are forwarded to the host.
 
+### Docker Desktop containers (no SSH tunnel)
+
+For a local Docker Desktop container (e.g. a VS Code dev container) you don't need
+an SSH reverse tunnel — the container can reach the host daemon directly over
+`host.docker.internal`. Point the shim at it instead:
+
+```bash
+# in the container (after deploying the token as above)
+export OP_FORWARD_HOST=host.docker.internal
+op-forward install
+```
+
+The daemon still binds loopback only; Docker Desktop routes `host.docker.internal`
+to the host, so no tunnel or extra proxy is needed.
+
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---|---|---|
 | `OP_FORWARD_PORT` | `18340` | Daemon listen port |
+| `OP_FORWARD_HOST` | `127.0.0.1` | Host the shim dials to reach the daemon. Set to `host.docker.internal` to reach the host from a Docker Desktop container without an SSH tunnel. |
 | `OP_FORWARD_TOKEN_DIR` | `~/Library/Caches/op-forward` (macOS) / `~/.cache/op-forward` (Linux) | Token storage directory |
 | `OP_FORWARD_TOKEN_FILE` | `$TOKEN_DIR/session.token` | Full path to token file |
 | `OP_FORWARD_PROBE_TIMEOUT_MS` | `500` | Shim TCP probe timeout |

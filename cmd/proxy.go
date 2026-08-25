@@ -35,6 +35,7 @@ const proxyExitInfraFailure = 127
 func runProxy() error {
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
 	port := fs.Int("port", getProxyPort(), "Daemon port")
+	host := fs.String("host", getProxyHost(), "Daemon host (set to host.docker.internal for Docker Desktop containers)")
 	timeoutMs := fs.Int("timeout", getProxyTimeout(), "Request timeout in milliseconds")
 	fs.Parse(os.Args[2:])
 
@@ -60,11 +61,11 @@ func runProxy() error {
 		// Fall through — accessValid is false, will trigger refresh below.
 	}
 
-	// Probe tunnel availability (fast TCP check).
-	addr := fmt.Sprintf("127.0.0.1:%d", *port)
+	// Probe daemon availability (fast TCP check).
+	addr := net.JoinHostPort(*host, strconv.Itoa(*port))
 	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "op-forward: tunnel not available on port %d\n", *port)
+		fmt.Fprintf(os.Stderr, "op-forward: daemon not reachable at %s\n", addr)
 		os.Exit(proxyExitInfraFailure)
 	}
 	conn.Close()
@@ -336,6 +337,16 @@ func getProxyPort() int {
 		}
 	}
 	return DefaultPort
+}
+
+// getProxyHost returns the host the shim dials to reach the daemon. Defaults to
+// loopback; set OP_FORWARD_HOST to host.docker.internal to reach the host daemon
+// from a Docker Desktop container without an SSH reverse tunnel.
+func getProxyHost() string {
+	if h := os.Getenv("OP_FORWARD_HOST"); h != "" {
+		return h
+	}
+	return "127.0.0.1"
 }
 
 func getProxyTimeout() int {
