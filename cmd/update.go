@@ -14,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+
+	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 )
 
 const (
@@ -59,8 +62,43 @@ func runUpdate() error {
 	}
 
 	fmt.Printf("Updated to v%s\n", latestVersion)
-	restartDaemon(execPath)
+	if restartDaemon(execPath) {
+		// launchd respawns the daemon with a short throttle, so the health
+		// endpoint is typically unreachable for several seconds. Report the
+		// outcome instead of leaving the user to discover a daemon that
+		// never came back.
+		ep, err := endpoint.ForListen(os.Getenv(endpoint.EnvListen), endpoint.PortFromEnv())
+		if err != nil {
+			return err
+		}
+		if err := waitForHealth(ep, 30*time.Second); err != nil {
+			return fmt.Errorf("daemon did not come back on %s: %w\nCheck ~/Library/Logs/op-forward.log or restart with: launchctl kickstart -k gui/$(id -u)/com.op-forward.daemon", ep, err)
+		}
+		fmt.Printf("Daemon is serving again on %s\n", ep)
+	}
 	return nil
+}
+
+// waitForHealth polls the daemon's health endpoint until it answers or the
+// timeout elapses.
+func waitForHealth(ep endpoint.Endpoint, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := ep.HTTPClient(2 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(ep.BaseURL() + "/health")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			lastErr = fmt.Errorf("health returned HTTP %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("no healthy response within %s (last error: %v)", timeout, lastErr)
 }
 
 // fetchLatestRelease queries the GitHub API for the most recent release.
@@ -141,18 +179,20 @@ func replaceBinary(newBinary []byte) (string, error) {
 }
 
 // restartDaemon sends SIGTERM to the running op-forward daemon so launchd
-// respawns it with the updated binary.
-func restartDaemon(binPath string) {
+// respawns it with the updated binary. It reports whether a daemon was
+// signaled, so the caller knows whether to wait for it to come back.
+func restartDaemon(binPath string) bool {
 	pid := findDaemonPID(binPath)
 	if pid == 0 {
 		fmt.Println("No running daemon found. It will pick up the new version on next start.")
-		return
+		return false
 	}
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		fmt.Printf("Could not restart daemon (PID %d): %v — restart manually with: launchctl kickstart gui/$(id -u)/com.op-forward.daemon\n", pid, err)
-		return
+		return false
 	}
-	fmt.Printf("Daemon restarted (PID %d terminated, launchd will respawn).\n", pid)
+	fmt.Printf("Daemon stopped (PID %d); waiting for launchd to respawn it...\n", pid)
+	return true
 }
 
 // findDaemonPID locates the running op-forward serve process.

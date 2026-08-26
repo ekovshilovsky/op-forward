@@ -22,15 +22,45 @@ case "$ARCH" in
     *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
 esac
 
+# Each container starts with a shim written by a release that installed the
+# binary to /usr/local/bin, as every release before 0.7.2 did. The package
+# must leave that shim working, since the person upgrading may not read the
+# package manager's output and other users on the machine never see it.
+OLD_SHIM='#!/bin/bash
+# op-forward shim — forwards op commands to host daemon via SSH tunnel.
+# Installed by op-forward. Do not edit directly.
+
+REAL_OP=""
+OP_FORWARD_BIN="/usr/local/bin/op-forward"
+
+if [ -x "$OP_FORWARD_BIN" ]; then
+  "$OP_FORWARD_BIN" proxy -- "$@"
+  exit $?
+fi
+echo "op-forward: proxy unavailable and no fallback op binary" >&2
+exit 1'
+
 run() {
     local distro="$1" image="$2" install="$3"
     echo "== $distro ($ARCH) =="
-    docker run --rm --platform "linux/$ARCH" -v "$PKG_DIR:/pkg:ro" "$image" sh -ec "
+    docker run --rm --platform "linux/$ARCH" -v "$PKG_DIR:/pkg:ro" -e OLD_SHIM="$OLD_SHIM" "$image" sh -ec "
+        mkdir -p /home/alice/.local/bin
+        printf '%s\n' \"\$OLD_SHIM\" > /home/alice/.local/bin/op
+        chmod 755 /home/alice/.local/bin/op
+        chown -R 1001:1001 /home/alice
         $install
         test -x /usr/bin/op-forward
         OUT=\$(op-forward version)
         echo \"\$OUT\"
-        case \"\$OUT\" in *\"$VERSION\"*) ;; *) echo 'version mismatch' >&2; exit 1 ;; esac"
+        case \"\$OUT\" in *\"$VERSION\"*) ;; *) echo 'version mismatch' >&2; exit 1 ;; esac
+        # The pre-0.7.2 shim must now reach the packaged binary. With no
+        # daemon and no tokens the proxy exits 127; anything else means the
+        # shim never found op-forward.
+        RC=0; /home/alice/.local/bin/op --version >/dev/null 2>&1 || RC=\$?
+        [ \"\$RC\" = 127 ] || { echo \"old shim exit=\$RC, want 127 (repaired shim reaching the packaged binary)\" >&2; exit 1; }
+        OWNER=\$(stat -c %u /home/alice/.local/bin/op)
+        [ \"\$OWNER\" = 1001 ] || { echo \"shim owner changed to \$OWNER\" >&2; exit 1; }
+        echo 'pre-0.7.2 shim repaired, ownership preserved'"
 }
 
 run debian debian:bookworm-slim \
