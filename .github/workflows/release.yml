@@ -193,6 +193,44 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$TAG_NAME" pkg-out/*
 
+      - name: Publish to the AUR
+        # Skipped in dry runs: the PKGBUILD checksums the published release
+        # assets, which do not exist for a dry-run version. The AUR push
+        # itself only happens when an AUR account's SSH key is configured;
+        # otherwise the generated PKGBUILD is still verified and kept as a
+        # build artifact.
+        if: env.DRY_RUN != 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          scripts/build-aur.sh "$VERSION" aur-out --verify
+          if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ]; then
+            echo "AUR_SSH_PRIVATE_KEY not set; PKGBUILD generated but not published"
+            exit 0
+          fi
+          mkdir -p -m 700 ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+          git clone -q ssh://aur@aur.archlinux.org/op-forward-bin.git /tmp/aur
+          cp aur-out/PKGBUILD aur-out/.SRCINFO /tmp/aur/
+          cd /tmp/aur
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet || git commit -m "Update to ${VERSION}"
+          git push origin HEAD:master
+
+      - name: Keep the generated PKGBUILD with the run
+        if: env.DRY_RUN != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aur-${{ env.TAG_NAME }}
+          path: aur-out/
+          retention-days: 30
+
       - name: Publish package repositories (APT, RPM, Alpine)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

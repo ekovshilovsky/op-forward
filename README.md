@@ -291,7 +291,11 @@ Linux packages are defined once in `nfpm.yaml` and built with
 make build-all VERSION=0.7.2
 scripts/build-packages.sh 0.7.2 dist pkg-out      # deb, rpm, apk, Arch for amd64 and arm64
 scripts/test-packages.sh 0.7.2 pkg-out            # install each in its distribution container
+scripts/build-aur.sh 0.7.2 aur-out --verify       # PKGBUILD + .SRCINFO for op-forward-bin, built in an Arch container
 ```
+
+The release workflow runs all of these; with `AUR_SSH_PRIVATE_KEY` configured it
+also pushes the generated `PKGBUILD` to the AUR as `op-forward-bin`.
 
 ## License
 
