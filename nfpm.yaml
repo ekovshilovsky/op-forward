@@ -1,0 +1,67 @@
+# nfpm packaging definition. One file drives every Linux package format;
+# scripts/build-packages.sh sets VERSION, ARCH, and the signing key variables
+# and invokes nfpm once per format and architecture.
+#
+# Packages install to /usr/bin, not /usr/local/bin: distribution policy
+# reserves /usr/local for the administrator, and Arch and rpmlint reject it.
+# Shims created by op-forward 0.7.1 or earlier embed the old path; the
+# postinstall script tells users to re-run `op-forward install`.
+name: op-forward
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: op-forward maintainers <ekovshilovsky@users.noreply.github.com>
+vendor: op-forward
+homepage: https://github.com/ekovshilovsky/op-forward
+license: MIT
+description: |
+  Forward 1Password CLI across SSH boundaries with biometric auth
+  op-forward runs a daemon on the host and installs a transparent op shim on
+  the remote side so that 1Password CLI commands inside VMs and containers
+  are forwarded to the host and authenticated with Touch ID.
+
+contents:
+  # nfpm expands environment variables in version, arch, and signing fields
+  # but not in content paths, so build-packages.sh stages the binary for the
+  # architecture being packaged at this fixed path before each invocation.
+  - src: build/op-forward
+    dst: /usr/bin/op-forward
+    file_info:
+      mode: 0755
+  - src: LICENSE
+    dst: /usr/share/licenses/op-forward/LICENSE
+    packager: rpm
+  - src: LICENSE
+    dst: /usr/share/licenses/op-forward/LICENSE
+    packager: archlinux
+  - src: LICENSE
+    dst: /usr/share/licenses/op-forward/LICENSE
+    packager: apk
+  - src: LICENSE
+    dst: /usr/share/doc/op-forward/copyright
+    packager: deb
+
+scripts:
+  postinstall: scripts/pkg/postinstall.sh
+
+rpm:
+  summary: Forward 1Password CLI across SSH boundaries with biometric auth
+  packager: op-forward maintainers <ekovshilovsky@users.noreply.github.com>
+  # Signed with the same key that signs the APT repository. An empty
+  # NFPM_RPM_KEY_FILE produces an unsigned package.
+  signature:
+    key_file: ${NFPM_RPM_KEY_FILE}
+
+apk:
+  # Alpine verifies packages and the APKINDEX with an RSA key installed as
+  # /etc/apk/keys/<key_name>.rsa.pub. An empty NFPM_APK_KEY_FILE produces an
+  # unsigned package that needs `apk add --allow-untrusted`.
+  signature:
+    key_file: ${NFPM_APK_KEY_FILE}
+    key_name: op-forward
+
+archlinux:
+  pkgbase: op-forward
+  packager: op-forward maintainers <ekovshilovsky@users.noreply.github.com>
