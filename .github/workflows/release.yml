@@ -168,8 +168,19 @@ jobs:
           fi
 
       - name: Build Linux packages (deb, rpm, apk, Arch)
+        env:
+          NFPM_VERSION: "2.47.0"
+          NFPM_SHA256: "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783"
         run: |
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          # Install nfpm from its prebuilt release, pinned by version and
+          # checksum. Building it with `go install` ties the release job to
+          # whatever Go version nfpm's module currently demands, which is
+          # unrelated to the toolchain this project pins in go.mod.
+          curl -fsSL -o /tmp/nfpm.tar.gz \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          echo "${NFPM_SHA256}  /tmp/nfpm.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          nfpm --version | head -1
           VERSION="${TAG_NAME#v}"
           scripts/build-packages.sh "$VERSION" dist pkg-out
 
