@@ -22,8 +22,15 @@ const shimTemplate = `#!/bin/bash
 REAL_OP="{{REAL_OP}}"
 OP_FORWARD_BIN="{{OP_FORWARD_BIN}}"
 
+# The recorded path can go stale when a package upgrade relocates the
+# binary (0.7.1 and earlier installed to /usr/local/bin; packages now use
+# /usr/bin). Fall back to whatever op-forward is on PATH before giving up.
+if [ ! -x "$OP_FORWARD_BIN" ]; then
+  OP_FORWARD_BIN="$(command -v op-forward 2>/dev/null || true)"
+fi
+
 # Delegate to op-forward proxy (handles tunnel probe, auth, JSON, HTTP)
-if [ -x "$OP_FORWARD_BIN" ]; then
+if [ -n "$OP_FORWARD_BIN" ] && [ -x "$OP_FORWARD_BIN" ]; then
   "$OP_FORWARD_BIN" proxy -- "$@"
   EXIT=$?
   # Exit code 0 or op-level non-zero: use as-is
@@ -70,9 +77,7 @@ func runInstall() error {
 		return fmt.Errorf("creating shim directory: %w", err)
 	}
 
-	// Generate the shim script with paths to op-forward binary and real op
-	shim := strings.ReplaceAll(shimTemplate, "{{OP_FORWARD_BIN}}", opForwardBin)
-	shim = strings.ReplaceAll(shim, "{{REAL_OP}}", realOp)
+	shim := renderShim(opForwardBin, realOp)
 
 	if err := os.WriteFile(shimPath, []byte(shim), 0755); err != nil {
 		return fmt.Errorf("writing shim: %w", err)
@@ -95,6 +100,13 @@ func runInstall() error {
 	}
 
 	return nil
+}
+
+// renderShim fills the shim template with the op-forward binary path
+// recorded at install time and the real op binary to fall back to.
+func renderShim(opForwardBin, realOp string) string {
+	shim := strings.ReplaceAll(shimTemplate, "{{OP_FORWARD_BIN}}", opForwardBin)
+	return strings.ReplaceAll(shim, "{{REAL_OP}}", realOp)
 }
 
 // findRealOp locates the real op binary, skipping any existing shim.

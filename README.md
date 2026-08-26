@@ -61,30 +61,54 @@ The daemon listens on `tcp://127.0.0.1:18340` (loopback only) by default and gen
 
 ### Set up the remote side (VM / Linux)
 
-Via APT (Ubuntu/Debian — recommended for VMs):
+Packages are published for every major distribution family from one signed
+pipeline; pick the one that matches the VM or container, then run
+`op-forward install` to set up the `op` shim.
+
+Debian / Ubuntu (APT):
 
 ```bash
-# Add the repository signing key and source
 curl -fsSL https://ekovshilovsky.github.io/op-forward/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/op-forward.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/op-forward.gpg] https://ekovshilovsky.github.io/op-forward stable main" | sudo tee /etc/apt/sources.list.d/op-forward.list
-sudo apt-get update
-sudo apt-get install op-forward
-
-# Install the op shim
-op-forward install
+sudo apt-get update && sudo apt-get install op-forward
 ```
 
-To upgrade: `sudo apt-get update && sudo apt-get upgrade op-forward`
-
-Via manual download:
+Fedora / RHEL / openSUSE (dnf, yum, zypper):
 
 ```bash
-# Download the latest release for your architecture
-curl -fsSL https://github.com/ekovshilovsky/op-forward/releases/latest/download/op-forward_$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').tar.gz | tar -xz -C ~/.local/bin/
+sudo curl -fsSL https://ekovshilovsky.github.io/op-forward/rpm/op-forward.repo -o /etc/yum.repos.d/op-forward.repo
+sudo dnf install op-forward
+```
 
-# Install the op shim
+Alpine (apk):
+
+```bash
+sudo curl -fsSL https://ekovshilovsky.github.io/op-forward/apk/op-forward.rsa.pub -o /etc/apk/keys/op-forward.rsa.pub
+echo "https://ekovshilovsky.github.io/op-forward/apk" | sudo tee -a /etc/apk/repositories
+sudo apk add op-forward
+```
+
+Arch Linux: download the `.pkg.tar.zst` for your architecture from the
+[latest release](https://github.com/ekovshilovsky/op-forward/releases/latest)
+and install it with `sudo pacman -U <file>`.
+
+Any other Linux (static binary, no package manager):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ekovshilovsky/op-forward/main/scripts/install.sh | sh
+```
+
+Then, on every remote system:
+
+```bash
 op-forward install
 ```
+
+Packages install the binary to `/usr/bin/op-forward`. Upgrading from a
+release before 0.7.2, which used `/usr/local/bin`, requires re-running
+`op-forward install` once so the shim picks up the new location.
+Upgrades afterwards go through the package manager
+(`apt-get upgrade`, `dnf upgrade`, `apk upgrade`).
 
 After installing, deploy the auth token and start the SSH tunnel:
 
@@ -245,7 +269,11 @@ If installed via Homebrew:
 brew upgrade ekovshilovsky/tap/op-forward
 ```
 
-The Homebrew formula is updated automatically on each release.
+If installed from a package repository, use the package manager
+(`apt-get upgrade op-forward`, `dnf upgrade op-forward`, `apk upgrade op-forward`).
+
+The Homebrew formula and every package repository are updated automatically
+on each release.
 
 ## Building
 
@@ -254,6 +282,15 @@ make build          # Build for current platform
 make build-all      # Cross-compile for darwin/linux × arm64/amd64
 make test           # Run tests
 make clean          # Remove build artifacts
+```
+
+Linux packages are defined once in `nfpm.yaml` and built with
+[nfpm](https://nfpm.goreleaser.com):
+
+```bash
+make build-all VERSION=0.7.2
+scripts/build-packages.sh 0.7.2 dist pkg-out      # deb, rpm, apk, Arch for amd64 and arm64
+scripts/test-packages.sh 0.7.2 pkg-out            # install each in its distribution container
 ```
 
 ## License
