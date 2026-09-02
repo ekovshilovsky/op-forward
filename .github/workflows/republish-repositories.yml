@@ -1,0 +1,110 @@
+name: Republish package repositories
+
+# Rebuild the published APT, RPM and Alpine repositories from the packages
+# already attached to this project's GitHub releases.
+#
+# The gh-pages branch is derived data, but until now it was also the only copy:
+# a branch that was deleted, truncated, or never created could only be restored
+# by tagging a version whose sole purpose was to trigger a publish. This offers
+# the repair on its own, and it is also how the Pages site gets re-enabled if
+# it was switched off, since a pushed branch that Pages is not serving answers
+# 404 with nothing in the logs to say why.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "republish" to rewrite the published package repositories
+        required: true
+        default: ""
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  republish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an explicit confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "republish" ]; then
+            echo "::error::This workflow rewrites the published repositories. Type republish to confirm."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+
+      - name: Import package signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APK_PRIVATE_KEY: ${{ secrets.APK_RSA_PRIVATE_KEY }}
+        run: |
+          mkdir -p -m 700 "$RUNNER_TEMP/keys"
+          # Unsigned metadata would be worse than stale metadata: existing
+          # installations trust this key and would start refusing the
+          # repository, so a missing key stops the run instead.
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::APT_GPG_PRIVATE_KEY is not set; refusing to publish unsigned repository metadata"
+            exit 1
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          if [ -n "${APK_PRIVATE_KEY:-}" ]; then
+            echo "$APK_PRIVATE_KEY" > "$RUNNER_TEMP/keys/op-forward.rsa"
+            echo "NFPM_APK_KEY_FILE=$RUNNER_TEMP/keys/op-forward.rsa" >> "$GITHUB_ENV"
+          fi
+
+      - name: Rebuild the repositories from the published releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+          BASE_URL: https://ekovshilovsky.github.io/op-forward
+        run: |
+          sudo apt-get install -y -q createrepo-c >/dev/null
+
+          if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+            git clone --branch gh-pages --single-branch \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/repo
+          else
+            mkdir -p /tmp/repo
+            git -C /tmp/repo init -b gh-pages
+          fi
+
+          export GPG_KEY_ID
+          scripts/build-repositories.sh /tmp/repo "$BASE_URL" "$GITHUB_REPOSITORY"
+
+      - name: Verify the generated APT metadata
+        run: |
+          # A repository that publishes an index naming no packages installs
+          # nothing, and does it without failing, so the run checks its own
+          # output before pushing it.
+          test -s /tmp/repo/dists/stable/Release
+          test -s /tmp/repo/dists/stable/InRelease
+          test -s /tmp/repo/key.gpg
+          for ARCH in amd64 arm64; do
+            PACKAGES="/tmp/repo/dists/stable/main/binary-${ARCH}/Packages"
+            COUNT=$(grep -c '^Package: ' "$PACKAGES" || true)
+            echo "${ARCH}: ${COUNT} package(s) indexed"
+            [ "$COUNT" -gt 0 ] || { echo "::error::no ${ARCH} packages indexed"; exit 1; }
+          done
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd /tmp/repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Rebuild package repositories from published releases"
+          if git remote | grep -q origin; then
+            git push origin gh-pages
+          else
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git push -u origin gh-pages
+          fi
+
+      - name: Ensure the Pages site serves gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ensure-pages.sh "$GITHUB_REPOSITORY"
