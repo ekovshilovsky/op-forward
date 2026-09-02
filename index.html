@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><head><title>op-forward package repositories</title></head>
+<body>
+<h1>op-forward package repositories</h1>
+<p>Forward 1Password CLI across SSH boundaries with biometric auth.
+   Source and releases: <a href="https://github.com/ekovshilovsky/op-forward">github.com/ekovshilovsky/op-forward</a></p>
+<h2>Debian / Ubuntu (APT)</h2>
+<pre>
+curl -fsSL https://ekovshilovsky.github.io/op-forward/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/op-forward.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/op-forward.gpg] https://ekovshilovsky.github.io/op-forward stable main" | sudo tee /etc/apt/sources.list.d/op-forward.list
+sudo apt-get update &amp;&amp; sudo apt-get install op-forward
+</pre>
+<h2>Fedora / RHEL / openSUSE (dnf, yum, zypper)</h2>
+<pre>
+sudo curl -fsSL https://ekovshilovsky.github.io/op-forward/rpm/op-forward.repo -o /etc/yum.repos.d/op-forward.repo
+sudo dnf install op-forward
+</pre>
+<h2>Alpine (apk)</h2>
+<pre>
+sudo curl -fsSL https://ekovshilovsky.github.io/op-forward/apk/op-forward.rsa.pub -o /etc/apk/keys/op-forward.rsa.pub
+echo "https://ekovshilovsky.github.io/op-forward/apk" | sudo tee -a /etc/apk/repositories
+sudo apk add op-forward
+</pre>
+<h2>Arch Linux, other distributions, macOS</h2>
+<p>Arch packages (<code>.pkg.tar.zst</code>), static tarballs, and macOS builds are attached to each
+   <a href="https://github.com/ekovshilovsky/op-forward/releases">GitHub release</a>;
+   Homebrew: <code>brew install ekovshilovsky/tap/op-forward</code>.</p>
+</body></html>

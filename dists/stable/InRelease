@@ -1,0 +1,28 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: op-forward
+Label: op-forward
+Suite: stable
+Codename: stable
+Date: Wed, 02 Sep 2026 02:17:56 UTC
+Architectures: amd64 arm64
+Components: main
+Description: op-forward APT repository — forward 1Password CLI across SSH boundaries
+MD5Sum:
+ 422bb02d4b6d3c3b05eb421e3708f914 745 main/binary-amd64/Packages
+ 83c3165cf54e55b2fd0b0d99bc1d40d2 745 main/binary-arm64/Packages
+ 0fc086d52ef8f26095a0caf9e8c3b286 493 main/binary-amd64/Packages.gz
+ 8715018fbfe47dd25cb4900ad6a16d03 495 main/binary-arm64/Packages.gz
+SHA256:
+ e80f81525f070b0a35f5fc13c7634368e8d9b9a9d3c0424221e4722e4ab277ff 745 main/binary-amd64/Packages
+ dccaa0c97c7ad8d55166fbe2fa02dc05cf35d64c8133a17240baae39563e747d 745 main/binary-arm64/Packages
+ 632253d3ddd408e2d2eb59ad557e887b1276c41b365370e4eea5de4d5cd671f3 493 main/binary-amd64/Packages.gz
+ ca2e55ff9ec3e4b8d5b5c1ae948cb76fce5c77f351ea82ac70048d8c35cb6682 495 main/binary-arm64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQRtV5DblbUIlVnXb9kQnapClxC3XQUCapeHVAAKCRAQnapClxC3
+XfcYAQDgvre4aETiMSTUxhomZMdxZdRoKvPETD1LEjf9B2ygrgD9HUXe3fXbavS2
+FHd1G5iXgpgHRvn8Wp90I4+MNxzeNgQ=
+=OzII
+-----END PGP SIGNATURE-----
