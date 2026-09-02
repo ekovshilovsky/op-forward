@@ -246,61 +246,27 @@ jobs:
           #   /apk         apk  (<arch>/APKINDEX.tar.gz, op-forward.rsa.pub)
           if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
             git clone --branch gh-pages --single-branch \
-              "https://x-access-token:${GH_TOKEN}@github.com/ekovshilovsky/op-forward.git" /tmp/repo
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/repo
           else
             mkdir -p /tmp/repo
             git -C /tmp/repo init -b gh-pages
           fi
 
-          # Keep previous versions in every repository so users who have not
-          # upgraded can still install the release they pinned.
+          # Packages just built go in directly; build-repositories.sh then
+          # reconciles the rest of the tree against the published releases, so
+          # earlier versions survive a branch that was deleted or truncated
+          # rather than only a branch that happened to still be there.
           mkdir -p /tmp/repo/pool /tmp/repo/rpm/x86_64 /tmp/repo/rpm/aarch64 /tmp/repo/apk/x86_64 /tmp/repo/apk/aarch64
           cp pkg-out/*.deb /tmp/repo/pool/
           cp pkg-out/*.x86_64.rpm /tmp/repo/rpm/x86_64/
           cp pkg-out/*.aarch64.rpm /tmp/repo/rpm/aarch64/
-
-          export GPG_KEY_ID
-          scripts/build-apt-repo.sh /tmp/repo
-          scripts/build-rpm-repo.sh /tmp/repo "$BASE_URL"
-
           if [ -n "${NFPM_APK_KEY_FILE:-}" ]; then
             cp pkg-out/*_x86_64.apk /tmp/repo/apk/x86_64/
             cp pkg-out/*_aarch64.apk /tmp/repo/apk/aarch64/
-            scripts/build-apk-repo.sh /tmp/repo "$NFPM_APK_KEY_FILE" op-forward
-          else
-            echo "APK_RSA_PRIVATE_KEY not set; skipping the Alpine repository"
           fi
 
-          cat > /tmp/repo/index.html <<INDEXEOF
-          <!DOCTYPE html>
-          <html><head><title>op-forward package repositories</title></head>
-          <body>
-          <h1>op-forward package repositories</h1>
-          <p>Forward 1Password CLI across SSH boundaries with biometric auth.
-             Source and releases: <a href="https://github.com/ekovshilovsky/op-forward">github.com/ekovshilovsky/op-forward</a></p>
-          <h2>Debian / Ubuntu (APT)</h2>
-          <pre>
-          curl -fsSL ${BASE_URL}/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/op-forward.gpg
-          echo "deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/op-forward.gpg] ${BASE_URL} stable main" | sudo tee /etc/apt/sources.list.d/op-forward.list
-          sudo apt-get update &amp;&amp; sudo apt-get install op-forward
-          </pre>
-          <h2>Fedora / RHEL / openSUSE (dnf, yum, zypper)</h2>
-          <pre>
-          sudo curl -fsSL ${BASE_URL}/rpm/op-forward.repo -o /etc/yum.repos.d/op-forward.repo
-          sudo dnf install op-forward
-          </pre>
-          <h2>Alpine (apk)</h2>
-          <pre>
-          sudo curl -fsSL ${BASE_URL}/apk/op-forward.rsa.pub -o /etc/apk/keys/op-forward.rsa.pub
-          echo "${BASE_URL}/apk" | sudo tee -a /etc/apk/repositories
-          sudo apk add op-forward
-          </pre>
-          <h2>Arch Linux, other distributions, macOS</h2>
-          <p>Arch packages (<code>.pkg.tar.zst</code>), static tarballs, and macOS builds are attached to each
-             <a href="https://github.com/ekovshilovsky/op-forward/releases">GitHub release</a>;
-             Homebrew: <code>brew install ekovshilovsky/tap/op-forward</code>.</p>
-          </body></html>
-          INDEXEOF
+          export GPG_KEY_ID
+          scripts/build-repositories.sh /tmp/repo "$BASE_URL" "$GITHUB_REPOSITORY"
 
           if [ "$DRY_RUN" = true ]; then
             echo "Dry run: repositories generated under /tmp/repo, not pushed"
@@ -314,9 +280,15 @@ jobs:
           if git remote | grep -q origin; then
             git push origin gh-pages
           else
-            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/ekovshilovsky/op-forward.git"
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             git push -u origin gh-pages
           fi
+
+      - name: Ensure the Pages site serves gh-pages
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ensure-pages.sh "$GITHUB_REPOSITORY"
 
       - name: Upload dry-run output
         if: env.DRY_RUN == 'true'
