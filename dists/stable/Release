@@ -2,17 +2,17 @@ Origin: op-forward
 Label: op-forward
 Suite: stable
 Codename: stable
-Date: Wed, 02 Sep 2026 02:17:56 UTC
+Date: Wed, 02 Sep 2026 02:22:43 UTC
 Architectures: amd64 arm64
 Components: main
 Description: op-forward APT repository — forward 1Password CLI across SSH boundaries
 MD5Sum:
- 422bb02d4b6d3c3b05eb421e3708f914 745 main/binary-amd64/Packages
- 83c3165cf54e55b2fd0b0d99bc1d40d2 745 main/binary-arm64/Packages
- 0fc086d52ef8f26095a0caf9e8c3b286 493 main/binary-amd64/Packages.gz
- 8715018fbfe47dd25cb4900ad6a16d03 495 main/binary-arm64/Packages.gz
+ c253c9927800b6fe12b3196a661f0864 1490 main/binary-amd64/Packages
+ a5f89be9c6d621ef712f0684b5588b57 1490 main/binary-arm64/Packages
+ 6244f38dbe732b9b8764ef7f00f903cd 616 main/binary-amd64/Packages.gz
+ a85e4b8936433aa24ba6ea2082aad43b 614 main/binary-arm64/Packages.gz
 SHA256:
- e80f81525f070b0a35f5fc13c7634368e8d9b9a9d3c0424221e4722e4ab277ff 745 main/binary-amd64/Packages
- dccaa0c97c7ad8d55166fbe2fa02dc05cf35d64c8133a17240baae39563e747d 745 main/binary-arm64/Packages
- 632253d3ddd408e2d2eb59ad557e887b1276c41b365370e4eea5de4d5cd671f3 493 main/binary-amd64/Packages.gz
- ca2e55ff9ec3e4b8d5b5c1ae948cb76fce5c77f351ea82ac70048d8c35cb6682 495 main/binary-arm64/Packages.gz
+ 15edf679ada110f1e3a34496f62a61eb2f284872bf8f1710a8174e6d004c2c40 1490 main/binary-amd64/Packages
+ 1a126634ef87893bba776b97eb1bd524ea99f369b192680449d7487fcfb07947 1490 main/binary-arm64/Packages
+ c44d8ea50319e135555dea1dcb0a4765521977f52f006a08fd8ca2c2ea6c7655 616 main/binary-amd64/Packages.gz
+ 4c92800501f975b449f1048b0e03da0eb5f1e09b99cbf0d175da8af64ed9a362 614 main/binary-arm64/Packages.gz
