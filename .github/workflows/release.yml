@@ -244,7 +244,13 @@ jobs:
           #   /            APT  (dists/, pool/, key.gpg)
           #   /rpm         dnf  (<arch>/repodata, op-forward.repo)
           #   /apk         apk  (<arch>/APKINDEX.tar.gz, op-forward.rsa.pub)
-          if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+          # A command substitution rather than `ls-remote | grep -q`: grep -q
+          # closes the pipe on its first match, ls-remote dies of SIGPIPE, and
+          # under pipefail the test reads false -- sending the run down the
+          # branch that re-initializes an orphan branch and discards the pool.
+          # GitHub's implicit `bash -e {0}` leaves it unarmed today, so adding
+          # `shell: bash` to this step is all it would take to lose the repo.
+          if [ -n "$(git ls-remote --heads origin gh-pages)" ]; then
             git clone --branch gh-pages --single-branch \
               "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/repo
           else
