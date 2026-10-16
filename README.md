@@ -1,6 +1,7 @@
 # op-forward
 
 [![CI](https://github.com/ekovshilovsky/op-forward/actions/workflows/ci.yml/badge.svg)](https://github.com/ekovshilovsky/op-forward/actions/workflows/ci.yml)
+[![Report Card](https://img.shields.io/endpoint?url=https%3A%2F%2Fekovshilovsky.github.io%2Fop-forward%2Freport%2Fbadge.json)](https://ekovshilovsky.github.io/op-forward/report/)
 [![Release](https://img.shields.io/github/v/release/ekovshilovsky/op-forward)](https://github.com/ekovshilovsky/op-forward/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/ekovshilovsky/op-forward.svg)](https://pkg.go.dev/github.com/ekovshilovsky/op-forward)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
