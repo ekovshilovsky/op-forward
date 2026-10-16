@@ -13,7 +13,7 @@ import (
 func TestExecute_TimeoutExitsWith124(t *testing.T) {
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "op")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec /bin/sleep 5\n"), 0o755); err != nil {
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec "+sleepPath(t)+" 5\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
