@@ -30,6 +30,15 @@ go vet ./...
 go test ./...
 ```
 
+### Report card
+
+A report card (formatting, `go vet`, golangci-lint, gosec, govulncheck, and
+test coverage) runs on every pull request and is published for the main branch.
+Run `scripts/build-report-card.sh <dir>` to reproduce it locally; it needs
+`golangci-lint`, `gosec`, and `govulncheck` on your PATH. The gate fails the
+build on test failures or reachable vulnerabilities. Lint and gosec findings
+lower the grade without blocking.
+
 ## Test-first development
 
 This project practices test-first development. A change lands together with a

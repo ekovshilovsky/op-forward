@@ -1,0 +1,112 @@
+name: Report card
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 05:17 UTC, so newly published vulnerability data is
+    # reflected even when the repository has been quiet.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Tool versions are pinned here so a report is reproducible and tool updates
+# are deliberate, reviewed changes.
+env:
+  GOLANGCI_LINT_VERSION: v2.15.0
+  GOSEC_VERSION: v2.29.0
+  GOVULNCHECK_VERSION: v1.9.0
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+
+      - name: Install golangci-lint
+        run: |
+          # Official release artifact, installed into the Go bin directory.
+          curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_VERSION}/install.sh" \
+            | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+
+      - name: Install gosec
+        run: |
+          # Official release artifact, installed into the Go bin directory.
+          # Fetched at the version tag, not a moving branch, so the installer
+          # and the binary it fetches change only when the pin does.
+          curl -sSfL "https://raw.githubusercontent.com/securego/gosec/${GOSEC_VERSION}/install.sh" \
+            | sh -s -- -b "$(go env GOPATH)/bin" "${GOSEC_VERSION}"
+
+      - name: Add Go tools to PATH
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Generate the report card
+        run: scripts/build-report-card.sh report-out
+
+      - name: Gate on tests and reachable vulnerabilities
+        run: scripts/build-report-card.sh --gate report-out
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-card
+          path: report-out/
+          retention-days: 30
+
+  # Publishing runs as its own job so the report job itself needs no write
+  # permission; fork pull requests therefore never execute with a writable
+  # token.
+  publish:
+    needs: report
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the report
+        uses: actions/download-artifact@v4
+        with:
+          name: report-card
+          path: report-out
+
+      - name: Publish the report to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The release workflow also writes to gh-pages (package
+          # repositories at the site root), so this step only touches /report
+          # and rebases onto any concurrent push before publishing.
+          if [ -n "$(git ls-remote --heads origin gh-pages)" ]; then
+            git clone --branch gh-pages --single-branch \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/repo
+          else
+            mkdir -p /tmp/repo
+            git -C /tmp/repo init -b gh-pages
+            git -C /tmp/repo remote add origin \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+
+          mkdir -p /tmp/repo/report
+          cp report-out/index.html report-out/badge.json /tmp/repo/report/
+
+          git -C /tmp/repo config user.name "github-actions[bot]"
+          git -C /tmp/repo config user.email "github-actions[bot]@users.noreply.github.com"
+          git -C /tmp/repo add -A
+          git -C /tmp/repo diff --cached --quiet \
+            || git -C /tmp/repo commit -m "Update report card for ${GITHUB_SHA::7}"
+          # Fresh branches have nothing to rebase onto.
+          if [ -n "$(git -C /tmp/repo ls-remote --heads origin gh-pages)" ]; then
+            git -C /tmp/repo pull --rebase origin gh-pages
+          fi
+          git -C /tmp/repo push origin HEAD:gh-pages
