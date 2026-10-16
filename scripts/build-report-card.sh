@@ -431,7 +431,7 @@ if [ "$GATE" = true ] && [ -s "$WORK/pkgcov.txt" ]; then
     # Floors: raise these in the pull request that earns the increase.
     floor_for() {
         case "$1" in
-            cmd)                echo 7 ;;
+            cmd)                echo 70 ;;
             internal/auth)      echo 75 ;;
             internal/daemon)    echo 80 ;;
             internal/endpoint)  echo 85 ;;
