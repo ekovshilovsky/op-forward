@@ -380,7 +380,12 @@ func waitSignal(t *testing.T, cmd *exec.Cmd) syscall.Signal {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
-	case <-done:
+	case err := <-done:
+		// A child killed by a signal reports a non-nil error from Wait;
+		// which signal it was is asserted from ProcessState below.
+		if err == nil {
+			t.Fatal("expected the signaled child's Wait to report an error")
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("child process did not exit")
 	}
