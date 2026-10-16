@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -142,7 +143,9 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		if upgradeRequired {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUpgradeRequired)
-			json.NewEncoder(w).Encode(map[string]string{"error": message})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+				log.Printf("[op-forward] warning: failed to write upgrade-required response: %v", err)
+			}
 			return
 		}
 	}
@@ -150,10 +153,17 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// Limit request body to 1 MB to prevent resource exhaustion
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
-	// Parse request
+	// Parse request. A single JSON value must account for the entire body:
+	// trailing data would mean part of what the client sent was silently
+	// ignored, and the protocol promises 400 for malformed bodies.
 	var req executor.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		http.Error(w, "invalid request: trailing data after JSON body", http.StatusBadRequest)
 		return
 	}
 
@@ -206,14 +216,16 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	if !tokenMatch || !s.refreshToken.IsValid() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"error": "refresh_token_expired",
 			"message": "op-forward: authentication expired — the op-forward refresh " +
 				"token has not been used in over 30 days and the daemon was restarted. " +
 				"Re-run your deployment script to push a fresh token to this VM. " +
 				"This is NOT a 1Password authentication issue — it is the op-forward " +
 				"inter-VM session token that needs to be redeployed.",
-		})
+		}); err != nil {
+			log.Printf("[op-forward] warning: failed to write token-expired response: %v", err)
+		}
 		return
 	}
 
@@ -246,7 +258,9 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	// Keep legacy session.token in sync for backward compatibility.
 	if legacyPath, err := auth.LegacyTokenPath(); err == nil {
-		auth.SaveToPath(newAccess, legacyPath)
+		if err := auth.SaveToPath(newAccess, legacyPath); err != nil {
+			log.Printf("[op-forward] warning: failed to save legacy session token: %v", err)
+		}
 	}
 
 	// Swap in-memory tokens.
@@ -257,12 +271,15 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 		newAccess.Expires.Format(time.RFC3339), newRefresh.Expires.Format(time.RFC3339))
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TokenRefreshResponse{
+	// #nosec G117 -- returning the rotated token pair is the purpose of this endpoint; the caller has just proven possession of the current refresh token, and the daemon listens only on loopback TCP or a user-private Unix socket (where the peer-credential check also applies)
+	if err := json.NewEncoder(w).Encode(TokenRefreshResponse{
 		AccessToken:    newAccess.Value,
 		AccessExpires:  newAccess.Expires.Format(time.RFC3339),
 		RefreshToken:   newRefresh.Value,
 		RefreshExpires: newRefresh.Expires.Format(time.RFC3339),
-	})
+	}); err != nil {
+		log.Printf("[op-forward] warning: failed to write token refresh response: %v", err)
+	}
 }
 
 // authenticateAccess verifies the Bearer token against the access token.

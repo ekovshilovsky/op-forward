@@ -16,14 +16,14 @@ func TestPeerUIDMatchesConnectingProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	sock := filepath.Join(dir, "s.sock")
 
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	accepted := make(chan net.Conn, 1)
 	go func() {
@@ -36,9 +36,9 @@ func TestPeerUIDMatchesConnectingProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	server := <-accepted
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	uid, ok := PeerUID(server)
 	if !ok {
@@ -54,7 +54,7 @@ func TestPeerUIDUnavailableOnTCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	accepted := make(chan net.Conn, 1)
 	go func() {
 		c, err := ln.Accept()
@@ -66,9 +66,9 @@ func TestPeerUIDUnavailableOnTCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	server := <-accepted
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	if _, ok := PeerUID(server); ok {
 		t.Fatal("PeerUID() claimed credentials on a TCP connection")

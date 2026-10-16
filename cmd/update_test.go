@@ -19,16 +19,20 @@ func TestWaitForHealthSucceedsOnceDaemonAnswers(t *testing.T) {
 	}
 	ep, _ := endpoint.Parse("tcp://" + ln.Addr().String())
 	// Hold the port but do not serve for a moment, then start answering.
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("releasing the probe listener: %v", err)
+	}
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		ln2, err := net.Listen("tcp", ep.Address)
 		if err != nil {
 			return
 		}
-		http.Serve(ln2, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Serve returns only when the listener is torn down at process exit,
+		// so its error carries no information for the test.
+		_ = http.Serve(ln2, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/health" {
-				w.Write([]byte(`{"status":"ok"}`))
+				_, _ = w.Write([]byte(`{"status":"ok"}`))
 			}
 		}))
 	}()
@@ -48,7 +52,9 @@ func TestWaitForHealthTimesOutWhenNothingAnswers(t *testing.T) {
 		t.Fatal(err)
 	}
 	ep, _ := endpoint.Parse("tcp://" + ln.Addr().String())
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("releasing the probe listener: %v", err)
+	}
 
 	if err := waitForHealth(ep, 500*time.Millisecond); err == nil {
 		t.Fatal("waitForHealth() succeeded with nothing listening")
