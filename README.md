@@ -297,6 +297,20 @@ scripts/build-aur.sh 0.7.2 aur-out --verify       # PKGBUILD + .SRCINFO for op-f
 The release workflow runs all of these; with `AUR_SSH_PRIVATE_KEY` configured it
 also pushes the generated `PKGBUILD` to the AUR as `op-forward-bin`.
 
+## Documentation
+
+Detailed reference documentation is in [`docs/`](docs/README.md):
+
+- [Architecture](docs/architecture.md): components, request flow, and why each piece exists
+- [Transport](docs/transport.md): `tcp://` and `unix://` endpoints, bind rules, peer credentials, SSH forwarding, Docker Desktop
+- [Tokens](docs/tokens.md): access and refresh tokens, rotation, expiry, file locations, legacy migration
+- [Security](docs/security.md): threat model, defense layers, blocked subcommands, and what is not protected
+- [Protocol](docs/protocol.md): HTTP API, status codes, headers, exit codes, timeouts, version negotiation
+- [Configuration](docs/configuration.md): every environment variable and flag, with precedence rules
+- [Deployment](docs/deployment.md): host and remote setup, token deployment, SSH tunnels, troubleshooting
+- [CLI](docs/cli.md): subcommand reference for `serve`, `install`, `proxy`, `service`, `update`, and `version`
+- [Development](docs/development.md): build, test, packaging, repositories, release and republish workflows
+
 ## License
 
 MIT
