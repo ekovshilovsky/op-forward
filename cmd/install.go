@@ -15,7 +15,11 @@ import (
 // It intercepts all op invocations and delegates to op-forward proxy,
 // which handles JSON encoding, HTTP transport, and response parsing in Go.
 // Falls back to the real op binary if op-forward proxy fails to connect.
-const shimTemplate = `#!/bin/bash
+// The shim is POSIX sh: NixOS has no /bin/bash at all, and minimal
+// environments such as stock Alpine ship only /bin/sh, so a bash shebang
+// would make the installed shim unrunnable exactly where op-forward is
+// most useful. Every construct below is POSIX.
+const shimTemplate = `#!/bin/sh
 # op-forward shim — forwards op commands to host daemon via SSH tunnel.
 # Installed by op-forward. Do not edit directly.
 
