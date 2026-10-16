@@ -44,8 +44,11 @@ func GenerateRefresh() *Token {
 
 func generate(ttl time.Duration) *Token {
 	b := make([]byte, TokenLength)
-	// crypto/rand.Read is documented to never return an error as of the Go
-	// version this module pins, so token generation is infallible.
+	// Since Go 1.24, crypto/rand.Read never returns an error: the runtime
+	// aborts the program if randomness is unavailable, so a token can never
+	// be built from unfilled bytes. The go directive in go.mod enforces a
+	// newer minimum at build time, which makes this guarantee load-bearing
+	// rather than assumed.
 	_, _ = rand.Read(b)
 	return &Token{
 		Value:   hex.EncodeToString(b),
