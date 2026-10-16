@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><title>op-forward report card</title></head>
+<body>
+<h1>op-forward report card</h1>
+<p>Overall grade: <strong>A</strong> (score 92 of 100).
+   Generated 2026-10-16 19:10:59 UTC. Source:
+   <a href="https://github.com/ekovshilovsky/op-forward">github.com/ekovshilovsky/op-forward</a></p>
+<h2>Results</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>Category</th><th>Result</th><th>Score</th><th>Grade</th></tr>
+<tr><td>gofmt</td><td>all files formatted</td><td>100</td><td>A+</td></tr>
+<tr><td>go vet</td><td>0 finding(s)</td><td>100</td><td>A+</td></tr>
+<tr><td>golangci-lint</td><td>0 finding(s)</td><td>100</td><td>A+</td></tr>
+<tr><td>gosec</td><td>0 high, 0 medium, 0 low</td><td>100</td><td>A+</td></tr>
+<tr><td>govulncheck</td><td>0 affecting vulnerability(ies)</td><td>100</td><td>A+</td></tr>
+<tr><td>go test</td><td>pass, 44.4% statement coverage</td><td>55</td><td>F</td></tr>
+</table>
+<h2>Grading</h2>
+<p>Each category starts at 100 points. The overall score is the integer average of the six categories.
+   The overall grade is F whenever a test fails or a vulnerability affects this module.</p>
+<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>Category</th><th>Deduction</th></tr>
+<tr><td>gofmt</td><td>10 per unformatted file</td></tr>
+<tr><td>go vet</td><td>10 per finding</td></tr>
+<tr><td>golangci-lint</td><td>5 per finding</td></tr>
+<tr><td>gosec</td><td>30 per high, 10 per medium, 2 per low finding</td></tr>
+<tr><td>govulncheck</td><td>100 if any vulnerability affects this module (reachable code); unreachable advisories are not counted</td></tr>
+<tr><td>go test</td><td>100 if any test fails; otherwise score is coverage percent times 100 divided by 80, capped at 100</td></tr>
+</table>
+<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>Score</th><th>Grade</th></tr>
+<tr><td>100</td><td>A+</td></tr>
+<tr><td>90 - 99</td><td>A</td></tr>
+<tr><td>80 - 89</td><td>B</td></tr>
+<tr><td>70 - 79</td><td>C</td></tr>
+<tr><td>60 - 69</td><td>D</td></tr>
+<tr><td>0 - 59</td><td>F</td></tr>
+</table>
+<h2>Tool versions</h2>
+<pre>
+go version go1.27.2 linux/amd64
+golangci-lint: golangci-lint has version 2.15.0 built with go1.27.0 from 25c5369a on 2026-10-16T11:03:09Z
+gosec: Version: 2.29.0 Git tag: v2.29.0 Build date: 2026-08-26T08:27:32Z
+govulncheck: Go: go1.27.2 Scanner: govulncheck@v1.9.0 DB: https://vuln.go.dev
+</pre>
+</body></html>
