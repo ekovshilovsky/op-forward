@@ -57,6 +57,16 @@
 
 set -euo pipefail
 
+# Any unexpected failure names its line and status. The checks themselves
+# never rely on this: each tool's expected nonzero exits are handled where
+# the tool runs, so this trap only fires for genuine breakage (one CI run
+# died of a SIGPIPE, exit 141, with nothing in the log to localize it).
+trap 'echo "build-report-card: aborted at line ${LINENO} (status $?)" >&2' ERR
+
+phase() {
+    echo "build-report-card: $*" >&2
+}
+
 GATE=false
 OUT_ARG=""
 for arg in "$@"; do
@@ -150,6 +160,7 @@ detail_block() {
 # or by other worktrees under .agent-grid. A syntax error makes gofmt exit
 # nonzero without listing the file, so it is counted as one finding rather
 # than silently passing.
+phase "running gofmt"
 gofmt_rc=0
 git ls-files -z -- '*.go' | xargs -0 gofmt -l > "$WORK/gofmt.txt" 2> "$WORK/gofmt.err" || gofmt_rc=$?
 gofmt_count=$(count_lines "$WORK/gofmt.txt")
@@ -160,6 +171,7 @@ fi
 
 # go vet: finding lines carry a file:line:col position; "#" lines only name
 # the package being analyzed.
+phase "running go vet"
 vet_rc=0
 go vet ./... > "$WORK/vet.out" 2>&1 || vet_rc=$?
 grep -E '^[^#[:space:]].*:[0-9]+:[0-9]+:' "$WORK/vet.out" > "$WORK/vet.txt" || true
@@ -171,6 +183,7 @@ fi
 
 # golangci-lint: exit 1 means issues were found; any other nonzero status is
 # an operational failure (bad configuration, crash) and aborts generation.
+phase "running golangci-lint"
 lint_rc=0
 golangci-lint run ./... > "$WORK/lint.out" 2> "$WORK/lint.err" || lint_rc=$?
 if [ "$lint_rc" -gt 1 ]; then
@@ -183,6 +196,7 @@ lint_count=$(count_lines "$WORK/lint.txt")
 # gosec: -no-fail keeps the exit status at zero when issues exist, so any
 # nonzero status is an operational failure. Severities are counted from the
 # JSON report.
+phase "running gosec"
 gosec -fmt=json -quiet -no-fail -out="$WORK/gosec.json" ./... > /dev/null 2> "$WORK/gosec.err" \
     || { cat "$WORK/gosec.err" >&2; die "gosec failed to run"; }
 # With zero findings and -quiet, gosec exits 0 without writing a report at
@@ -210,6 +224,7 @@ awk -F'"' '
 # "Vulnerability #N" entry only for affecting vulnerabilities; advisories for
 # modules or packages that are required but never called are summarized
 # separately and intentionally not counted.
+phase "running govulncheck"
 vuln_rc=0
 govulncheck ./... > "$WORK/vuln.out" 2> "$WORK/vuln.err" || vuln_rc=$?
 if [ "$vuln_rc" -ne 0 ] && [ "$vuln_rc" -ne 3 ]; then
@@ -224,6 +239,7 @@ grep -E '^(Vulnerability #|    Found in:|    Fixed in:)' "$WORK/vuln.out" > "$WO
 
 # go test with statement coverage across every package. Tests failing is a
 # normal outcome to report, not a generation failure.
+phase "running go test with coverage"
 test_rc=0
 go test -coverprofile="$WORK/cover.out" ./... > "$WORK/test.out" 2>&1 || test_rc=$?
 coverage="0.0"
@@ -268,7 +284,9 @@ esac
 # --- tool versions -------------------------------------------------------------
 
 version_of() {
-    "$@" 2>&1 | head -n 3 | tr '\n' ' ' | sed -e 's/ *$//' | html_escape
+    # sed -n consumes its whole input, unlike head, which exits after three
+    # lines and can kill a still-writing tool with SIGPIPE under pipefail.
+    "$@" 2>&1 | sed -n '1,3p' | tr '\n' ' ' | sed -e 's/ *$//' | html_escape
 }
 go_version=$(go version | html_escape)
 lint_version=$(version_of golangci-lint --version)
