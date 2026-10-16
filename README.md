@@ -39,6 +39,12 @@ Via the install script:
 curl -fsSL https://raw.githubusercontent.com/ekovshilovsky/op-forward/main/scripts/install.sh | sh
 ```
 
+Via the Go toolchain (any platform with Go installed):
+
+```bash
+go install github.com/ekovshilovsky/op-forward@latest
+```
+
 Or build from source:
 
 ```bash
@@ -98,6 +104,10 @@ Any other Linux (static binary, no package manager):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ekovshilovsky/op-forward/main/scripts/install.sh | sh
 ```
+
+Or, with a Go toolchain available, `go install
+github.com/ekovshilovsky/op-forward@latest` works on every supported
+platform and reports the real release version.
 
 Then, on every remote system:
 

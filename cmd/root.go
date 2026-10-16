@@ -3,12 +3,44 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 )
 
 // Version is set at build time via ldflags:
 //
 //	go build -ldflags="-X github.com/ekovshilovsky/op-forward/cmd.Version=0.3.0"
+//
+// Builds that skip the ldflags, such as a plain 'go install
+// github.com/ekovshilovsky/op-forward@latest', still report the module
+// version recorded by the Go toolchain; see resolveVersion.
 var Version = "dev"
+
+func init() {
+	info, ok := debug.ReadBuildInfo()
+	Version = resolveVersion(Version, info, ok)
+}
+
+// resolveVersion chooses the version string the binary reports. An explicit
+// ldflags value wins, since the release pipeline stamps it from the tag. When
+// the ldflags default is still in place, the module version the Go toolchain
+// embedded takes over: 'go install module@version' records the module version,
+// and a build inside a git checkout records a tag-derived version such as
+// "v1.0.0+dirty". The toolchain reports "(devel)" only when it has neither,
+// which carries no more information than the default, so the default is kept.
+func resolveVersion(current string, info *debug.BuildInfo, ok bool) string {
+	if current != "dev" {
+		return current
+	}
+	if !ok || info == nil {
+		return current
+	}
+	v := info.Main.Version
+	if v == "" || v == "(devel)" {
+		return current
+	}
+	return strings.TrimPrefix(v, "v")
+}
 
 // ExitStatus is the error a command returns when the process must terminate
 // with a specific exit code. The command has already written any diagnostic
