@@ -10,6 +10,25 @@ import (
 //	go build -ldflags="-X github.com/ekovshilovsky/op-forward/cmd.Version=0.3.0"
 var Version = "dev"
 
+// ExitStatus is the error a command returns when the process must terminate
+// with a specific exit code. The command has already written any diagnostic
+// to stderr by the time it returns one, so the caller turns it into the
+// process exit code without printing it again.
+//
+// The proxy relies on this for its exit-code contract: 127 tells the op shim
+// that the forwarding infrastructure failed and the real op binary should be
+// exec'd instead, while every other value is relayed from the forwarded op
+// command unchanged. A zero status is never returned for a completed command;
+// success is a nil error. Zero is used only for a help request, which
+// terminates the process successfully without running the command.
+type ExitStatus int
+
+// Error describes the status for logs and test failures. Callers that map the
+// status to a process exit code do not print it.
+func (e ExitStatus) Error() string {
+	return fmt.Sprintf("exit status %d", int(e))
+}
+
 func Execute() error {
 	if len(os.Args) < 2 {
 		printUsage()
