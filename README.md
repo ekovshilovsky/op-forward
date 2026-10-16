@@ -113,8 +113,9 @@ Upgrades afterwards go through the package manager
 After installing, deploy the auth token and start the SSH tunnel:
 
 ```bash
-# Deploy auth token (from host)
-scp ~/Library/Caches/op-forward/session.token vm:~/.cache/op-forward/session.token
+# Deploy the refresh token (from host). The remote fetches its own
+# short-lived access token from the daemon on first use.
+scp ~/Library/Caches/op-forward/refresh.token vm:~/.cache/op-forward/refresh.token
 ```
 
 Start the SSH tunnel:
@@ -184,7 +185,7 @@ container (`docker run` fails at mount time with `operation not supported`).
 | `OP_FORWARD_PORT` | `18340` | TCP port shorthand, used by both sides when the full endpoint form above is unset |
 | `OP_FORWARD_HOST` | `127.0.0.1` | TCP host shorthand for the shim. Set to `host.docker.internal` to reach the host from a Docker Desktop container without an SSH tunnel. Never used by the daemon. |
 | `OP_FORWARD_TOKEN_DIR` | `~/Library/Caches/op-forward` (macOS) / `~/.cache/op-forward` (Linux) | Token storage directory |
-| `OP_FORWARD_TOKEN_FILE` | `$TOKEN_DIR/session.token` | Full path to token file |
+| `OP_FORWARD_TOKEN_FILE` | `$TOKEN_DIR/access.token` | Full path to the access token file (applies to the access token only) |
 | `OP_FORWARD_PROBE_TIMEOUT_MS` | `500` | How long the shim waits for the daemon to accept a connection before falling back to the local `op` |
 | `OP_FORWARD_FETCH_TIMEOUT_MS` | `60000` | Shim HTTP request timeout |
 
@@ -193,6 +194,7 @@ container (`docker run` fails at mount time with `operation not supported`).
 ```
 op-forward serve [--listen EP]    Start the host daemon (EP: tcp://127.0.0.1:PORT or unix:///path.sock)
 op-forward install                Install the op shim on the remote side
+op-forward proxy [args...]        Forward one op command to the daemon (used by the shim)
 op-forward service install        Install as a launchd daemon (macOS)
 op-forward service uninstall      Remove the launchd daemon
 op-forward update                 Update to the latest release
@@ -208,7 +210,7 @@ op-forward is designed for environments where the host is trusted and the remote
 Additional layers:
 
 - **Local-only binding**: TCP endpoints must be loopback; the daemon refuses to bind anything else, so it is unreachable from the network. Unix socket endpoints are created `0600` inside a `0700` directory, and the daemon additionally checks the connecting process's uid (`SO_PEERCRED` / `LOCAL_PEERCRED`) and refuses other users even if the socket file is exposed.
-- **Bearer token authentication**: A 32-byte random hex token with 30-day sliding expiry. Generated on first run, stored with 0600 permissions.
+- **Bearer token authentication**: Two 32-byte random hex tokens stored with 0600 permissions: a 1-hour access token presented on every request, and a 30-day refresh token that is rotated each time it is used to obtain a new access token.
 - **No shell execution**: Commands are executed via `os/exec` (direct exec), not through a shell. Shell injection is structurally impossible.
 - **Argument sanitization**: Arguments containing shell metacharacters (`` ` ``, `$`, `|`, `;`, `&`, newlines) are rejected before execution.
 - **Blocked subcommands**: `signin`, `signout`, `update`, and `completion` are blocked — they either require interactive input or would modify the host's op configuration.
