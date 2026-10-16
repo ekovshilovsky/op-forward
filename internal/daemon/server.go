@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -152,10 +153,17 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// Limit request body to 1 MB to prevent resource exhaustion
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
-	// Parse request
+	// Parse request. A single JSON value must account for the entire body:
+	// trailing data would mean part of what the client sent was silently
+	// ignored, and the protocol promises 400 for malformed bodies.
 	var req executor.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		http.Error(w, "invalid request: trailing data after JSON body", http.StatusBadRequest)
 		return
 	}
 
