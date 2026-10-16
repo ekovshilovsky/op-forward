@@ -130,7 +130,9 @@ func SaveToPath(t *Token, path string) error {
 		return fmt.Errorf("writing token: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		// Best-effort removal of the staged temp file; the rename failure
+		// returned below is the actionable error.
+		_ = os.Remove(tmp)
 		return fmt.Errorf("renaming token file: %w", err)
 	}
 	return nil
@@ -139,7 +141,7 @@ func SaveToPath(t *Token, path string) error {
 // LoadFromPath reads a token from the specified path.
 // The TTL field is not stored on disk, so the caller must set it.
 func LoadFromPath(path string) (*Token, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is resolved from the invoking user's own OP_FORWARD_TOKEN_FILE/OP_FORWARD_TOKEN_DIR environment or their cache directory, and that same user owns the token files it protects
 	if err != nil {
 		return nil, fmt.Errorf("reading token: %w", err)
 	}

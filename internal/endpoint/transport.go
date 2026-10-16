@@ -76,7 +76,9 @@ func (e Endpoint) listenUnix() (net.Listener, error) {
 		return nil, fmt.Errorf("listen on unix socket: %w", err)
 	}
 	if err := os.Chmod(e.Address, 0o600); err != nil {
-		ln.Close()
+		// Best-effort release of the listener; the chmod failure returned
+		// below is the actionable error.
+		_ = ln.Close()
 		return nil, fmt.Errorf("restricting socket permissions: %w", err)
 	}
 	return ln, nil

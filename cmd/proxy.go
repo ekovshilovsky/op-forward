@@ -38,7 +38,9 @@ func runProxy() error {
 	port := fs.Int("port", endpoint.PortFromEnv(), "Daemon port")
 	host := fs.String("host", endpoint.HostFromEnv(), "Daemon host (set to host.docker.internal for Docker Desktop containers)")
 	timeoutMs := fs.Int("timeout", getProxyTimeout(), "Request timeout in milliseconds")
-	fs.Parse(os.Args[2:])
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
 
 	args := fs.Args()
 
@@ -165,7 +167,10 @@ func runProxy() error {
 
 	// Relay op command output and exit code as-is
 	if result.Stdout != "" {
-		fmt.Fprint(os.Stdout, result.Stdout)
+		// A write failure here means the consumer closed stdout (for example a
+		// terminated pipeline). There is no channel left to report it on, and
+		// the op exit code below is still relayed to the caller.
+		_, _ = fmt.Fprint(os.Stdout, result.Stdout)
 	}
 	if result.Stderr != "" {
 		fmt.Fprint(os.Stderr, result.Stderr)
@@ -189,7 +194,9 @@ func executeWithAuth(client *http.Client, ep endpoint.Endpoint, body []byte, tok
 	if err != nil {
 		return nil, nil, err
 	}
-	defer resp.Body.Close()
+	// The body is read in full below; a close failure on a fully consumed
+	// response carries no actionable information.
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -222,7 +229,9 @@ func attemptRefresh(client *http.Client, ep endpoint.Endpoint, refreshToken stri
 	if err != nil {
 		return nil, fmt.Errorf("refresh request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	// The body is read in full below; a close failure on a fully consumed
+	// response carries no actionable information.
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -231,7 +240,10 @@ func attemptRefresh(client *http.Client, ep endpoint.Endpoint, refreshToken stri
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp tokenRefreshResponse
-		json.Unmarshal(body, &errResp)
+		// A non-JSON error body is expected from intermediaries; in that case
+		// errResp.Message stays empty and the raw HTTP status and body are
+		// reported below instead.
+		_ = json.Unmarshal(body, &errResp)
 		if errResp.Message != "" {
 			return nil, fmt.Errorf("%s", errResp.Message)
 		}
@@ -280,7 +292,7 @@ func readTokenValue(path string) string {
 // readToken reads a token file and returns the value and whether it is
 // still valid (not expired). Returns ("", false) on any error.
 func readToken(path string) (value string, valid bool) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from the invoking user's own OP_FORWARD_TOKEN_FILE/OP_FORWARD_TOKEN_DIR environment or their cache directory, the same user who owns the token files being read
 	if err != nil {
 		return "", false
 	}
@@ -302,7 +314,10 @@ func readToken(path string) (value string, valid bool) {
 // saveTokenFile writes a token value and expiry to disk atomically.
 func saveTokenFile(path, value, expires string) {
 	dir := filepath.Dir(path)
-	os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "op-forward: warning: could not cache token at %s: %v\n", path, err)
+		return
+	}
 	content := fmt.Sprintf("%s\n%s\n", value, expires)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(content), 0600); err != nil {
@@ -310,7 +325,9 @@ func saveTokenFile(path, value, expires string) {
 		return
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		// Best-effort removal of the staged temp file; the rename failure
+		// reported below is the actionable error.
+		_ = os.Remove(tmp)
 		fmt.Fprintf(os.Stderr, "op-forward: warning: could not cache token at %s: %v\n", path, err)
 	}
 }

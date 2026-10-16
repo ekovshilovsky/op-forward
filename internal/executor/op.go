@@ -101,6 +101,7 @@ func Execute(req *Request) (*Result, error) {
 		return nil, fmt.Errorf("op CLI not found in PATH: %w", err)
 	}
 
+	// #nosec G204 -- opPath is the absolute path returned by exec.LookPath("op"), and every argument has passed Request.Validate (argument count and length limits, blocked subcommands, shell metacharacters rejected); no shell is involved
 	cmd := exec.CommandContext(ctx, opPath, req.Args...)
 
 	// Run op inside a full pseudo-TTY so it detects an interactive session

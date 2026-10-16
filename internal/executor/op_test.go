@@ -178,7 +178,7 @@ func TestDisableOutputPostProcessing_NoCarriageReturn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pty.Open() failed: %v", err)
 	}
-	defer ptmx.Close()
+	defer func() { _ = ptmx.Close() }()
 
 	disableOutputPostProcessing(ptmx)
 
@@ -188,10 +188,10 @@ func TestDisableOutputPostProcessing_NoCarriageReturn(t *testing.T) {
 	cmd.Stdout = pts
 	cmd.Stderr = pts
 	if err := cmd.Start(); err != nil {
-		pts.Close()
+		_ = pts.Close()
 		t.Fatalf("cmd.Start() failed: %v", err)
 	}
-	pts.Close()
+	_ = pts.Close()
 
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(ptmx)

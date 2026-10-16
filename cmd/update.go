@@ -88,7 +88,9 @@ func waitForHealth(ep endpoint.Endpoint, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(ep.BaseURL() + "/health")
 		if err == nil {
-			resp.Body.Close()
+			// The health probe only needs the status code, so the body is
+			// closed without being read and a close failure is irrelevant.
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}
@@ -110,7 +112,8 @@ func fetchLatestRelease() (*githubRelease, error) {
 	if err != nil {
 		return nil, fmt.Errorf("checking for updates: %w", err)
 	}
-	defer resp.Body.Close()
+	// A close failure after reading the release metadata is not actionable.
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
@@ -142,11 +145,13 @@ func downloadReleaseBinary(release *githubRelease, version string) ([]byte, erro
 
 	fmt.Printf("Downloading %s...\n", wantName)
 
+	// #nosec G107 -- downloadURL is the browser_download_url of an asset in the release metadata fetched over TLS from the GitHub API for this project's compile-time repository constants
 	resp, err := http.Get(downloadURL)
 	if err != nil {
 		return nil, fmt.Errorf("downloading update: %w", err)
 	}
-	defer resp.Body.Close()
+	// A close failure after the archive has been consumed is not actionable.
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download returned status %d", resp.StatusCode)
@@ -168,11 +173,14 @@ func replaceBinary(newBinary []byte) (string, error) {
 	}
 
 	tmpPath := execPath + ".update"
+	// #nosec G306 -- the staged file replaces the running executable and must carry the execute bit; it is written beside the existing binary in a location the invoking user already controls
 	if err := os.WriteFile(tmpPath, newBinary, 0755); err != nil {
 		return "", fmt.Errorf("writing update: %w", err)
 	}
 	if err := os.Rename(tmpPath, execPath); err != nil {
-		os.Remove(tmpPath)
+		// Best-effort removal of the staged file; the rename failure
+		// returned below is the actionable error.
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("replacing binary: %w", err)
 	}
 	return execPath, nil
@@ -198,6 +206,7 @@ func restartDaemon(binPath string) bool {
 // findDaemonPID locates the running op-forward serve process.
 // Returns 0 if no daemon is found.
 func findDaemonPID(binPath string) int {
+	// #nosec G204 -- fixed pgrep binary name; the pattern is built from binPath, which is the current executable's own symlink-resolved path, and no shell is involved
 	out, err := osexec.Command("pgrep", "-f", binPath+" serve").Output()
 	if err != nil {
 		return 0
@@ -223,7 +232,9 @@ func extractBinaryFromTarGz(r io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decompressing update: %w", err)
 	}
-	defer gz.Close()
+	// Closing the gzip reader only releases decompressor state; every read
+	// error that matters is already surfaced by the tar reader below.
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {

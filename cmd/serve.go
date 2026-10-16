@@ -14,7 +14,9 @@ func runServe() error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	listen := fs.String("listen", os.Getenv(endpoint.EnvListen), "Listen endpoint: tcp://127.0.0.1:port or unix:///path.sock (overrides --port)")
 	port := fs.Int("port", endpoint.PortFromEnv(), "Loopback TCP port to listen on")
-	fs.Parse(os.Args[2:])
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
 
 	ep, err := endpoint.ForListen(endpointArg(*listen, explicitFlags(fs), "port"), *port)
 	if err != nil {
@@ -55,7 +57,11 @@ func runServe() error {
 	// Write the access token to the legacy session.token path so that older
 	// proxy clients that read session.token continue to work until upgraded.
 	if legacyPath, err := auth.LegacyTokenPath(); err == nil {
-		auth.SaveToPath(accessToken, legacyPath)
+		// The legacy file only serves older clients, so a failed write is
+		// reported but must not prevent the daemon from starting.
+		if err := auth.SaveToPath(accessToken, legacyPath); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write legacy session token: %v\n", err)
+		}
 	}
 
 	fmt.Printf("Starting daemon on %s\n", ep)

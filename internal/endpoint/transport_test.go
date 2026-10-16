@@ -20,17 +20,19 @@ func shortSocketPath(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return filepath.Join(dir, "s.sock")
 }
 
 func serveOK(t *testing.T, ln net.Listener) {
 	t.Helper()
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "ok")
+		_, _ = io.WriteString(w, "ok")
 	})}
-	go srv.Serve(ln)
-	t.Cleanup(func() { srv.Close() })
+	// Serve returns once the server is closed during cleanup; that error is
+	// the expected shutdown signal rather than a test failure.
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
 }
 
 func TestListenRefusesNonLoopbackTCP(t *testing.T) {
@@ -45,7 +47,7 @@ func TestListenTCPLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() error: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	serveOK(t, ln)
 
 	ep, _ := Parse("tcp://" + ln.Addr().String())
@@ -56,7 +58,7 @@ func TestListenTCPLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
@@ -70,7 +72,7 @@ func TestListenUnixCreatesPrivateSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() error: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	serveOK(t, ln)
 
 	dirInfo, err := os.Stat(filepath.Dir(sock))
@@ -96,7 +98,7 @@ func TestListenUnixCreatesPrivateSocket(t *testing.T) {
 		t.Fatalf("Get() over unix socket error: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if string(body) != "ok" {
 		t.Fatalf("body = %q, want ok", body)
 	}
@@ -112,7 +114,9 @@ func TestListenUnixReplacesStaleSocket(t *testing.T) {
 		t.Fatalf("creating stale socket: %v", err)
 	}
 	stale.(*net.UnixListener).SetUnlinkOnClose(false)
-	stale.Close()
+	if err := stale.Close(); err != nil {
+		t.Fatalf("closing stale listener: %v", err)
+	}
 	if _, err := os.Stat(sock); err != nil {
 		t.Fatalf("stale socket should remain on disk: %v", err)
 	}
@@ -121,7 +125,7 @@ func TestListenUnixReplacesStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() over stale socket error: %v", err)
 	}
-	ln.Close()
+	_ = ln.Close()
 }
 
 func TestListenUnixRefusesLiveSocket(t *testing.T) {
@@ -132,7 +136,7 @@ func TestListenUnixRefusesLiveSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Listen() error: %v", err)
 	}
-	defer live.Close()
+	defer func() { _ = live.Close() }()
 
 	if _, err := ep.Listen(); err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Fatalf("second Listen() error = %v, want 'in use'", err)

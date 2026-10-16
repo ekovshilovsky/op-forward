@@ -55,7 +55,9 @@ func runInstall() error {
 	// run time, so nothing is baked in here. --port is accepted for scripts
 	// that still pass it.
 	_ = fs.Int("port", endpoint.PortFromEnv(), "Accepted for backward compatibility; the shim reads the environment at run time")
-	fs.Parse(os.Args[2:])
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
 
 	// Find the real op binary (before our shim shadows it)
 	realOp := findRealOp()
@@ -73,12 +75,14 @@ func runInstall() error {
 		}
 	}
 
+	// #nosec G301 -- ~/.local/bin is a PATH directory that must stay world-traversable like the standard user bin directory; it holds only the executable shim, never secrets
 	if err := os.MkdirAll(shimDir, 0755); err != nil {
 		return fmt.Errorf("creating shim directory: %w", err)
 	}
 
 	shim := renderShim(opForwardBin, realOp)
 
+	// #nosec G306 -- the shim is an executable script that must carry the execute bit; it contains only binary paths and no secrets
 	if err := os.WriteFile(shimPath, []byte(shim), 0755); err != nil {
 		return fmt.Errorf("writing shim: %w", err)
 	}

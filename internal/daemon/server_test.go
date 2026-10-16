@@ -57,7 +57,9 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding health response: %v", err)
+	}
 	if body["status"] != "ok" {
 		t.Errorf("health body status = %q, want 'ok'", body["status"])
 	}
@@ -172,7 +174,9 @@ func TestExecute_BlockedSubcommand(t *testing.T) {
 	}
 
 	var result executor.Result
-	json.NewDecoder(w.Body).Decode(&result)
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding execute response: %v", err)
+	}
 	if result.ExitCode != 1 {
 		t.Errorf("exit_code = %d, want 1", result.ExitCode)
 	}
@@ -277,7 +281,9 @@ func TestTokenRefresh_ExpiredRefreshToken(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding token refresh error response: %v", err)
+	}
 	if resp["error"] != "refresh_token_expired" {
 		t.Errorf("error = %q, want 'refresh_token_expired'", resp["error"])
 	}
@@ -337,7 +343,9 @@ func TestTokenRefresh_SlidingExpiry(t *testing.T) {
 	}
 
 	var resp TokenRefreshResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding token refresh response: %v", err)
+	}
 
 	expires, err := time.Parse(time.RFC3339, resp.RefreshExpires)
 	if err != nil {
@@ -440,7 +448,9 @@ func TestExecute_VersionNegotiation_UpgradeRequired(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding upgrade-required response: %v", err)
+	}
 	if resp["error"] == "" {
 		t.Error("response should contain an error message")
 	}

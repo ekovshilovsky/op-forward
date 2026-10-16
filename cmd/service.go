@@ -57,7 +57,9 @@ func renderPlist(label, binPath, listen, home, logPath string) string {
 
 func xmlText(s string) string {
 	var buf bytes.Buffer
-	xml.EscapeText(&buf, []byte(s))
+	// EscapeText only returns errors surfaced by the destination writer, and
+	// bytes.Buffer writes never fail.
+	_ = xml.EscapeText(&buf, []byte(s))
 	return buf.String()
 }
 
@@ -108,18 +110,24 @@ func serviceInstall() error {
 	plistDir := filepath.Join(home, "Library", "LaunchAgents")
 	plistPath := filepath.Join(plistDir, launchdLabel+".plist")
 
+	// #nosec G301 -- ~/Library/LaunchAgents is created with the 0755 mode macOS itself uses for it; it contains only launchd job definitions, never secrets
 	if err := os.MkdirAll(plistDir, 0755); err != nil {
 		return fmt.Errorf("creating LaunchAgents directory: %w", err)
 	}
 
 	plist := renderPlist(launchdLabel, binPath, ep.String(), home, logPath)
+	// #nosec G306 -- launchd job definitions use the standard 0644 mode and launchd only requires that they not be group or world writable; the plist holds the binary path, listen endpoint and log paths, never a token
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		return fmt.Errorf("writing plist: %w", err)
 	}
 
-	// Unload if already loaded, then load
-	exec.Command("launchctl", "unload", plistPath).Run()
-	if err := exec.Command("launchctl", "load", "-w", plistPath).Run(); err != nil {
+	// Unload if already loaded, then load. The unload failing is expected on a
+	// first install, when no job is loaded yet, so its result is discarded.
+	// #nosec G204 -- fixed launchctl binary name; the only variable argument is the plist path, derived from the current user's home directory and a constant label for a file this process just wrote
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	// #nosec G204 -- fixed launchctl binary name; the only variable argument is the plist path, derived from the current user's home directory and a constant label for a file this process just wrote
+	loadErr := exec.Command("launchctl", "load", "-w", plistPath).Run()
+	if loadErr != nil {
 		// Try bootstrap for newer macOS
 		uid := ""
 		if u, uerr := user.Current(); uerr == nil {
@@ -128,9 +136,14 @@ func serviceInstall() error {
 		if uid == "" {
 			uid = "501"
 		}
-		exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s", uid), plistPath).Run()
-		if err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%s", uid), plistPath).Run(); err != nil {
-			return fmt.Errorf("loading launchd service: %w", err)
+		// As with the unload above, a failed bootout only means nothing was
+		// bootstrapped for this user yet, so its result is discarded.
+		// #nosec G204 -- fixed launchctl binary name; the domain target is built from the uid reported by user.Current (or the default 501) and the plist path is one this process just wrote
+		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s", uid), plistPath).Run()
+		// #nosec G204 -- fixed launchctl binary name; the domain target is built from the uid reported by user.Current (or the default 501) and the plist path is one this process just wrote
+		bootstrapErr := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%s", uid), plistPath).Run()
+		if bootstrapErr != nil {
+			return fmt.Errorf("loading launchd service: %w", bootstrapErr)
 		}
 	}
 
@@ -148,7 +161,10 @@ func serviceUninstall() error {
 
 	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
 
-	exec.Command("launchctl", "unload", plistPath).Run()
+	// Unload fails when the job is not loaded, which is an acceptable state
+	// for an uninstall; the plist removal below is the step that matters.
+	// #nosec G204 -- fixed launchctl binary name; the only variable argument is the plist path, derived from the current user's home directory and a constant label
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
 	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("removing plist: %w", err)
 	}

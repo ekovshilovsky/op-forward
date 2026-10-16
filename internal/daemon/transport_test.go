@@ -19,7 +19,7 @@ func TestServeOverUnixEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	ep := endpoint.Endpoint{Network: "unix", Address: filepath.Join(dir, "s.sock")}
 
 	srv, _, _ := newTestServer()
@@ -28,14 +28,16 @@ func TestServeOverUnixEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() error: %v", err)
 	}
-	go srv.Serve(ln)
-	defer ln.Close()
+	// Serve returns once the listener is closed during teardown; that error
+	// is the expected shutdown signal rather than a test failure.
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = ln.Close() }()
 
 	resp, err := ep.HTTPClient(2 * time.Second).Get(ep.BaseURL() + "/health")
 	if err != nil {
 		t.Fatalf("GET /health over unix socket: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
