@@ -73,6 +73,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # Two pushes to main in quick succession produce two publishes racing
+    # over the gh-pages ref; the loser's push is rejected with a ref-lock
+    # error (observed on the first day in production). Queue them instead.
+    concurrency:
+      group: gh-pages-publish
+      cancel-in-progress: false
     steps:
       - name: Download the report
         uses: actions/download-artifact@v4
@@ -105,8 +111,18 @@ jobs:
           git -C /tmp/repo add -A
           git -C /tmp/repo diff --cached --quiet \
             || git -C /tmp/repo commit -m "Update report card for ${GITHUB_SHA::7}"
-          # Fresh branches have nothing to rebase onto.
-          if [ -n "$(git -C /tmp/repo ls-remote --heads origin gh-pages)" ]; then
-            git -C /tmp/repo pull --rebase origin gh-pages
-          fi
-          git -C /tmp/repo push origin HEAD:gh-pages
+          # Fresh branches have nothing to rebase onto. The release workflow
+          # also pushes gh-pages, and no concurrency group spans workflows,
+          # so a rejected push is rebased and retried a few times before
+          # giving up.
+          for attempt in 1 2 3; do
+            if [ -n "$(git -C /tmp/repo ls-remote --heads origin gh-pages)" ]; then
+              git -C /tmp/repo pull --rebase origin gh-pages
+            fi
+            if git -C /tmp/repo push origin HEAD:gh-pages; then
+              exit 0
+            fi
+            echo "push rejected (attempt ${attempt}); rebasing and retrying"
+          done
+          echo "could not push the report after 3 attempts" >&2
+          exit 1
