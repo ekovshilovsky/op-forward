@@ -50,12 +50,12 @@ exit 1
 `
 
 func runInstall() error {
-	fs := flag.NewFlagSet("install", flag.ExitOnError)
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	// The shim reads OP_FORWARD_ADDR / OP_FORWARD_HOST / OP_FORWARD_PORT at
 	// run time, so nothing is baked in here. --port is accepted for scripts
 	// that still pass it.
 	_ = fs.Int("port", endpoint.PortFromEnv(), "Accepted for backward compatibility; the shim reads the environment at run time")
-	if err := fs.Parse(os.Args[2:]); err != nil {
+	if err := parseFlags(fs, os.Args[2:]); err != nil {
 		return err
 	}
 

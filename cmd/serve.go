@@ -11,10 +11,10 @@ import (
 )
 
 func runServe() error {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := fs.String("listen", os.Getenv(endpoint.EnvListen), "Listen endpoint: tcp://127.0.0.1:port or unix:///path.sock (overrides --port)")
 	port := fs.Int("port", endpoint.PortFromEnv(), "Loopback TCP port to listen on")
-	if err := fs.Parse(os.Args[2:]); err != nil {
+	if err := parseFlags(fs, os.Args[2:]); err != nil {
 		return err
 	}
 

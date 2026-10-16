@@ -1,10 +1,36 @@
 package cmd
 
 import (
+	"errors"
 	"flag"
+	"os"
 
 	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 )
+
+// parseFlags parses args into a flag set that was created with
+// flag.ContinueOnError and converts the outcome into the exit statuses the
+// standard library would have produced under flag.ExitOnError: a help request
+// (-h or -help) ends the process successfully, and any other parse failure
+// ends it with status 2, the conventional usage-error code. Returning the
+// status instead of exiting inside the flag package keeps the command
+// callable in-process while the process-level behavior stays the same.
+//
+// The flag package prints the parse error and the usage text to the flag
+// set's output before returning, so diagnostics are directed to standard
+// error here and the returned status carries only the exit code.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	fs.SetOutput(os.Stderr)
+	err := fs.Parse(args)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, flag.ErrHelp):
+		return ExitStatus(0)
+	default:
+		return ExitStatus(2)
+	}
+}
 
 // explicitFlags returns the names of the flags the user actually typed, as
 // opposed to those holding their defaults.
