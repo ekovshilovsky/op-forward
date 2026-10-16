@@ -193,6 +193,17 @@ gosec_high=$(count_matches '"severity": *"HIGH"' "$WORK/gosec.json")
 gosec_medium=$(count_matches '"severity": *"MEDIUM"' "$WORK/gosec.json")
 gosec_low=$(count_matches '"severity": *"LOW"' "$WORK/gosec.json")
 gosec_total=$((gosec_high + gosec_medium + gosec_low))
+# A one-line-per-finding summary for the report's details section, so a
+# finding that appears only in CI's environment is diagnosable from the
+# published report. The JSON is pretty-printed one key per line, which is
+# what this extraction relies on.
+awk -F'"' '
+    /"severity":/ { sev=$4 }
+    /"rule_id":/  { rule=$4 }
+    /"details":/  { det=$4 }
+    /"file":/     { file=$4 }
+    /"line":/     { printf "%s %s %s:%s %s\n", sev, rule, file, $4, det }
+' "$WORK/gosec.json" > "$WORK/gosec.txt" || true
 
 # govulncheck: exit 0 means nothing affects this module and exit 3 means at
 # least one reachable vulnerability was found. Text mode prints a numbered
@@ -330,11 +341,12 @@ govulncheck: ${vuln_version}
 </pre>
 HTMLEOF
     if [ -s "$WORK/gofmt.txt" ] || [ -s "$WORK/vet.txt" ] || [ -s "$WORK/lint.txt" ] \
-        || [ -s "$WORK/vuln.txt" ] || [ -s "$WORK/test.txt" ]; then
+        || [ -s "$WORK/gosec.txt" ] || [ -s "$WORK/vuln.txt" ] || [ -s "$WORK/test.txt" ]; then
         echo '<h2>Details</h2>'
         detail_block "gofmt" "$WORK/gofmt.txt"
         detail_block "go vet" "$WORK/vet.txt"
         detail_block "golangci-lint" "$WORK/lint.txt"
+        detail_block "gosec" "$WORK/gosec.txt"
         detail_block "govulncheck" "$WORK/vuln.txt"
         detail_block "go test" "$WORK/test.txt"
     fi
