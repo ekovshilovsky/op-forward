@@ -2,6 +2,7 @@ package executor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,19 @@ import (
 // directory and points PATH exclusively at that directory, so Execute resolves
 // the stub and nothing else. The PATH change is process-wide, so tests using
 // this helper must not run in parallel.
+// sleepPath resolves the sleep binary on the test process's PATH. The fake
+// op scripts run with PATH reduced to their own directory, and a hardcoded
+// /bin/sleep does not exist in every build environment (the Nix sandbox and
+// NixOS have no /bin beyond sh), so the fixture embeds the resolved path.
+func sleepPath(t *testing.T) string {
+	t.Helper()
+	p, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skipf("no sleep binary on PATH: %v", err)
+	}
+	return p
+}
+
 func installFakeOp(t *testing.T, mode os.FileMode, script string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -75,7 +89,7 @@ func TestValidate_ArgumentLengthBoundaryIsInclusive(t *testing.T) {
 func TestExecute_RelaysStdoutAndExitCode(t *testing.T) {
 	// The brief sleep keeps the child from writing before the parent has
 	// cleared OPOST on the PTY; see the report for why that ordering matters.
-	installFakeOp(t, 0o755, "#!/bin/sh\n/bin/sleep 0.2\necho a\necho b\nexit 3\n")
+	installFakeOp(t, 0o755, "#!/bin/sh\n"+sleepPath(t)+" 0.2\necho a\necho b\nexit 3\n")
 
 	res, err := Execute(&Request{Args: []string{"whoami"}})
 	if err != nil {
