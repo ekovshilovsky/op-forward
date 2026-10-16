@@ -54,6 +54,17 @@
 # weight) and maps through the same table. Regardless of the average, the
 # overall grade is capped at F when any test fails or when govulncheck
 # reports a vulnerability that affects this module.
+#
+# COVERAGE FLOORS AND RATCHET (gate only; the score formula is unchanged)
+#
+# Each package has a floor below which --gate fails. Floors start at the
+# levels the suite actually held when this mechanism landed and are raised
+# by the pull request that earns the increase, so the gate always states a
+# guarantee the tree really provides. Independently, when the previously
+# published coverage.json is reachable, --gate fails if any package drops
+# more than 0.5 points below its published value (the ratchet), so coverage
+# can only move up, package by package. main is exempt from both: its three
+# statements are the process exit.
 
 set -euo pipefail
 
@@ -250,6 +261,33 @@ if [ -s "$WORK/cover.out" ]; then
 fi
 grep -E '^(--- FAIL|FAIL|panic:)' "$WORK/test.out" > "$WORK/test.txt" || true
 
+# Per-package statement coverage, computed from the raw profile. The single
+# total hides where the gaps are (a command layer at 7% once hid behind
+# healthy internals), so the report publishes the breakdown and the gate
+# enforces per-package floors and a ratchet against it.
+awk -F'[ :]' '
+    /^mode:/ { next }
+    {
+        n = split($1, parts, "/")
+        pkg = ""
+        for (i = 4; i < n; i++) pkg = pkg (pkg == "" ? "" : "/") parts[i]
+        if (pkg == "") pkg = "main"
+        stmts = $(NF-1); covered = ($NF > 0) ? $(NF-1) : 0
+        total[pkg] += stmts; hit[pkg] += covered
+    }
+    END {
+        for (p in total) printf "%s %d %d %.1f\n", p, hit[p], total[p], 100 * hit[p] / total[p]
+    }
+' "$WORK/cover.out" | sort > "$WORK/pkgcov.txt"
+
+{
+    printf '{\n  "total": %s' "$coverage"
+    while read -r pkg covered total pct; do
+        printf ',\n  "%s": %s' "$pkg" "$pct"
+    done < "$WORK/pkgcov.txt"
+    printf '\n}\n'
+} > "$OUT_DIR/coverage.json"
+
 # --- grading -----------------------------------------------------------------
 
 gofmt_score=$(deduct $((gofmt_count * 10)))
@@ -329,6 +367,18 @@ HTMLEOF
     row "go test" "$test_result, ${coverage}% statement coverage" "$test_score" "$(grade_for "$test_score")"
     cat <<HTMLEOF
 </table>
+<h2>Coverage by package</h2>
+<p>The gate enforces a floor per package and a ratchet against the previously
+   published values (<a href="coverage.json">coverage.json</a>); floors rise
+   with the pull requests that earn them.</p>
+<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>Package</th><th>Covered/Total statements</th><th>Percent</th></tr>
+HTMLEOF
+    while read -r pkg covered total pct; do
+        printf '<tr><td>%s</td><td>%s/%s</td><td>%s%%</td></tr>\n' "$pkg" "$covered" "$total" "$pct"
+    done < "$WORK/pkgcov.txt"
+    cat <<HTMLEOF
+</table>
 <h2>Grading</h2>
 <p>Each category starts at 100 points. The overall score is the integer average of the six categories.
    The overall grade is F whenever a test fails or a vulnerability affects this module.</p>
@@ -376,8 +426,50 @@ printf '{"schemaVersion":1,"label":"report card","message":"%s","color":"%s"}\n'
 
 echo "Report card: ${overall_grade} (score ${overall_score}); written to ${OUT_DIR}"
 
-if [ "$GATE" = true ] && { [ "$test_rc" -ne 0 ] || [ "$vuln_count" -gt 0 ]; }; then
+gate_coverage_failures=""
+if [ "$GATE" = true ] && [ -s "$WORK/pkgcov.txt" ]; then
+    # Floors: raise these in the pull request that earns the increase.
+    floor_for() {
+        case "$1" in
+            cmd)                echo 7 ;;
+            internal/auth)      echo 75 ;;
+            internal/daemon)    echo 80 ;;
+            internal/endpoint)  echo 85 ;;
+            internal/executor)  echo 70 ;;
+            internal/version)   echo 100 ;;
+            *)                  echo "" ;;
+        esac
+    }
+    baseline="$WORK/baseline.json"
+    have_baseline=false
+    if [ -n "${REPORT_CARD_BASELINE_URL:-}" ]; then
+        if curl -fsSL --max-time 20 "$REPORT_CARD_BASELINE_URL" -o "$baseline" 2>/dev/null; then
+            have_baseline=true
+        else
+            echo "note: baseline unreachable at ${REPORT_CARD_BASELINE_URL}; ratchet skipped" >&2
+        fi
+    fi
+    while read -r pkg covered total pct; do
+        floor=$(floor_for "$pkg")
+        if [ -n "$floor" ]; then
+            if [ "$(awk -v p="$pct" -v f="$floor" 'BEGIN { print (p < f) ? 1 : 0 }')" -eq 1 ]; then
+                gate_coverage_failures="${gate_coverage_failures}${pkg} at ${pct}% is below its ${floor}% floor; "
+            fi
+        fi
+        if [ "$have_baseline" = true ] && [ "$pkg" != "main" ]; then
+            prev=$(tr -d ' ' < "$baseline" | tr ',' '\n' | sed -n 's|^"'"$pkg"'":\([0-9.]*\).*|\1|p' | head -n 1)
+            if [ -n "$prev" ]; then
+                if [ "$(awk -v p="$pct" -v q="$prev" 'BEGIN { print (p < q - 0.5) ? 1 : 0 }')" -eq 1 ]; then
+                    gate_coverage_failures="${gate_coverage_failures}${pkg} dropped to ${pct}% from the published ${prev}%; "
+                fi
+            fi
+        fi
+    done < "$WORK/pkgcov.txt"
+fi
+
+if [ "$GATE" = true ] && { [ "$test_rc" -ne 0 ] || [ "$vuln_count" -gt 0 ] || [ -n "$gate_coverage_failures" ]; }; then
     echo "Gate failed: tests=${test_result}, affecting vulnerabilities=${vuln_count}" >&2
+    [ -n "$gate_coverage_failures" ] && echo "Coverage gate: ${gate_coverage_failures}" >&2
     exit 2
 fi
 exit 0

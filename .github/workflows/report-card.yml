@@ -53,7 +53,9 @@ jobs:
       - name: Generate the report card
         run: scripts/build-report-card.sh report-out
 
-      - name: Gate on tests and reachable vulnerabilities
+      - name: Gate on tests, reachable vulnerabilities, and coverage floors
+        env:
+          REPORT_CARD_BASELINE_URL: https://ekovshilovsky.github.io/op-forward/report/coverage.json
         run: scripts/build-report-card.sh --gate report-out
 
       - name: Upload the report
@@ -109,7 +111,7 @@ jobs:
               git -C /tmp/repo reset -q --hard origin/gh-pages
             fi
             mkdir -p /tmp/repo/report
-            cp report-out/index.html report-out/badge.json /tmp/repo/report/
+            cp report-out/index.html report-out/badge.json report-out/coverage.json /tmp/repo/report/
             git -C /tmp/repo add -A
             if git -C /tmp/repo diff --cached --quiet; then
               echo "published report already matches; nothing to push"
