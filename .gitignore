@@ -6,3 +6,4 @@ dist/
 *.tar.gz
 .DS_Store
 build/
+.findings/
