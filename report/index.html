@@ -2,18 +2,18 @@
 <html><head><title>op-forward report card</title></head>
 <body>
 <h1>op-forward report card</h1>
-<p>Overall grade: <strong>A</strong> (score 92 of 100).
-   Generated 2026-10-16 21:16:19 UTC. Source:
+<p>Overall grade: <strong>A</strong> (score 98 of 100).
+   Generated 2026-10-16 21:33:54 UTC. Source:
    <a href="https://github.com/ekovshilovsky/op-forward">github.com/ekovshilovsky/op-forward</a></p>
 <h2>Results</h2>
 <table border="1" cellpadding="4" cellspacing="0">
 <tr><th>Category</th><th>Result</th><th>Score</th><th>Grade</th></tr>
 <tr><td>gofmt</td><td>all files formatted</td><td>100</td><td>A+</td></tr>
 <tr><td>go vet</td><td>0 finding(s)</td><td>100</td><td>A+</td></tr>
-<tr><td>golangci-lint</td><td>0 finding(s)</td><td>100</td><td>A+</td></tr>
+<tr><td>golangci-lint</td><td>1 finding(s)</td><td>95</td><td>A</td></tr>
 <tr><td>gosec</td><td>0 high, 0 medium, 0 low</td><td>100</td><td>A+</td></tr>
 <tr><td>govulncheck</td><td>0 affecting vulnerability(ies)</td><td>100</td><td>A+</td></tr>
-<tr><td>go test</td><td>pass, 44.4% statement coverage</td><td>55</td><td>F</td></tr>
+<tr><td>go test</td><td>pass, 77.8% statement coverage</td><td>97</td><td>A</td></tr>
 </table>
 <h2>Coverage by package</h2>
 <p>The gate enforces a floor per package and a ratchet against the previously
@@ -21,7 +21,7 @@
    with the pull requests that earn them.</p>
 <table border="1" cellpadding="4" cellspacing="0">
 <tr><th>Package</th><th>Covered/Total statements</th><th>Percent</th></tr>
-<tr><td>cmd</td><td>33/428</td><td>7.7%</td></tr>
+<tr><td>cmd</td><td>314/428</td><td>73.4%</td></tr>
 <tr><td>internal/auth</td><td>71/92</td><td>77.2%</td></tr>
 <tr><td>internal/daemon</td><td>113/134</td><td>84.3%</td></tr>
 <tr><td>internal/endpoint</td><td>95/110</td><td>86.4%</td></tr>
@@ -56,5 +56,10 @@ go version go1.27.2 linux/amd64
 golangci-lint: golangci-lint has version 2.15.0 built with go1.27.0 from 25c5369a on 2026-10-16T11:03:09Z
 gosec: Version: 2.29.0 Git tag: v2.29.0 Build date: 2026-08-26T08:27:32Z
 govulncheck: Go: go1.27.2 Scanner: govulncheck@v1.9.0 DB: https://vuln.go.dev
+</pre>
+<h2>Details</h2>
+<h3>golangci-lint</h3>
+<pre>
+cmd/update_cmd_test.go:383:7: Error return value is not checked (errcheck)
 </pre>
 </body></html>
