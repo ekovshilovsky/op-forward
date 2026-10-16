@@ -17,8 +17,10 @@ op-forward keeps `op` where it works, on the host, and makes the remote side
 believe it has a local `op`. A small daemon on the host executes commands on
 behalf of remote callers; a shim on the remote side intercepts every `op`
 invocation and forwards it. Each forwarded command is executed by the real `op`
-on the host, so the biometric prompt appears on the host exactly as it would for
-a command typed there.
+on the host, under a pseudo-terminal so that `op` behaves as it does in an
+interactive terminal. Biometric prompting is the 1Password desktop application's
+documented behavior, which op-forward preserves rather than enforces; how often a
+prompt appears is controlled by 1Password's own settings.
 
 ## Components
 

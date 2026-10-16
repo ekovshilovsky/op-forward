@@ -81,7 +81,8 @@ POST /op/execute
 | `timeout_ms` | integer, optional | Execution timeout in milliseconds; see [Timeouts](#timeouts) |
 
 Unknown fields are ignored. The request body is limited to 1 MiB; a larger body,
-an empty body, or malformed JSON returns 400.
+an empty body, or malformed JSON returns 400. Trailing data after the JSON value
+is rejected.
 
 The daemon applies these steps in order and stops at the first that fails:
 
@@ -232,10 +233,17 @@ standard input, output, and error. Three consequences:
 - **Terminal-style output passes through unchanged.** Because `op` believes it
   is attached to an interactive terminal, it may format output for a terminal,
   including ANSI color escape sequences. The daemon and the proxy do not strip or
-  rewrite them; the client receives the bytes `op` produced. A caller that needs
-  plain text must remove escapes itself.
-- **No newline translation.** The executor disables output post-processing on
-  the terminal (OPOST), so `\n` is not converted to `\r\n`.
+  rewrite them; the escape sequences reach the client as part of `stdout`. A
+  caller that needs plain text must remove escapes itself.
+- **Output is carried as a JSON string.** `stdout` is a JSON string, so output
+  must be valid UTF-8 to arrive intact. Invalid UTF-8 sequences are replaced
+  during JSON encoding, which means binary output is not preserved exactly.
+- **Newlines are not translated, in practice.** The executor turns off the
+  terminal's output post-processing (OPOST) immediately after starting `op`, so
+  `\n` is normally not converted to `\r\n`. The change is applied after the
+  process has started and the result of the terminal calls is not checked, so
+  there is a narrow window in which very early output could still be translated,
+  and no translation is guaranteed if those calls fail.
 
 Standard input is not forwarded. The request carries arguments only, so
 subcommands that read from stdin do not receive the caller's input.
@@ -284,7 +292,10 @@ Versions are compared as `major.minor.patch`. A leading `v` is ignored. Missing
 components count as 0. A component that is not a plain integer, including a
 pre-release suffix such as `1.2.3-rc1`, makes the whole version compare as
 `0.0.0`. A daemon built without a version (`dev`) compares as `0.0.0`, so it
-never reports an update.
+does not report an update to a client that is at or above the minimum version.
+The one exception is the `426` response: when a client below the minimum
+triggers it, the daemon sets `X-Update-Available` to its own version even if
+that version is `dev`.
 
 The proxy prints a hint on stderr whenever the header is present, even if the
 request otherwise succeeds:

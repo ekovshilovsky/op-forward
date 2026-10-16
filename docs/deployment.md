@@ -213,8 +213,9 @@ set `OP_FORWARD_PORT` on the remote machine, or use full endpoints. A persistent
 `RemoteForward 18340 127.0.0.1:18340` entry in `~/.ssh/config` is equivalent.
 
 Use `ControlMaster=no` and `ControlPath=none` (or a dedicated host entry) when
-you rely on connection multiplexing elsewhere, because multiplexed sessions
-establish `RemoteForward` only on the first connection.
+you rely on connection multiplexing elsewhere: per the OpenSSH documentation, a
+multiplexed session reuses the first connection, so `RemoteForward` is
+established only by the first connection.
 
 ### Unix socket
 
@@ -267,7 +268,8 @@ op-forward install
 The full form is `OP_FORWARD_ADDR=tcp://host.docker.internal:18340`. Keep the
 daemon on its default TCP endpoint; a host Unix socket cannot be bind-mounted
 into a Docker Desktop container (see
-[transport.md](transport.md#docker-desktop-containers)). The shim reads the
+[transport.md](transport.md#docker-desktop-containers); both Docker Desktop
+claims were verified empirically during development). The shim reads the
 variable each time it runs, so set it in the container's environment (an image
 `ENV`, a devcontainer setting, or a shell profile).
 
@@ -276,12 +278,13 @@ variable each time it runs, so set it in the container's environment (an image
 | Installed with | Upgrade with | Notes |
 |---|---|---|
 | Homebrew | `brew upgrade ekovshilovsky/tap/op-forward` | Re-run `op-forward service install` if the service's recorded binary path changed |
-| Install script or tarball | `op-forward update` | Restarts a running daemon and waits for `/health` |
+| Install script or tarball | `op-forward update` | Stops the running daemon (SIGTERM) and relies on the supervisor (launchd) to start the new binary, then waits for `/health`; without a supervisor the daemon stays down |
 | APT, dnf, apk | `apt-get upgrade`, `dnf upgrade`, `apk upgrade` | The binary lives in `/usr/bin` |
 | Arch package | Download and `pacman -U` the new package | |
 
 After upgrading the host binary, the running daemon must be restarted to run the
-new version; `op-forward update` does this itself. Older clients keep working
+new version. `op-forward update` signals the daemon to stop and expects launchd to
+start it again; a daemon started by hand is not restarted. Older clients keep working
 unless the daemon's minimum version excludes them (see
 [protocol.md](protocol.md#version-negotiation)).
 
@@ -335,7 +338,8 @@ the note there about rotation. Meanings of each message are in
 
 - Host: `socket PATH is already in use by another daemon` means a daemon is
   listening there, for example a launchd job and a manual `serve` configured
-  with the same path. Stop one. A socket left by a daemon that was killed is
+  with the same path. Stop one. A socket that does not answer the daemon's probe
+  (for example one left by a daemon that was killed) is treated as stale and
   replaced automatically.
 - Host: `PATH exists and is not a socket; refusing to replace it` means a regular
   file or directory is at the path. Choose another path or remove the file
@@ -343,7 +347,8 @@ the note there about rotation. Meanings of each message are in
 - Host: `socket directory ... is mode ...; it must be 0700` or `owned by uid`
   means the parent directory is shared or belongs to another user. Use a private
   directory such as `~/Library/Caches/op-forward`.
-- VM: `ssh -R` reports `Address already in use` for the socket path. Set
+- VM: `ssh -R` reports `Address already in use` for the socket path (this is
+  OpenSSH's error text, not an op-forward message). Set
   `StreamLocalBindUnlink yes` on the VM's sshd, or delete the leftover socket file.
 - A bind failure for a long path includes a hint about the roughly 104-byte limit
   on macOS; shorten the path.

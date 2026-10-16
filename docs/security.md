@@ -36,7 +36,9 @@ startup. The daemon has no option to listen on another interface. See
 Unix socket endpoints must live in a directory owned by the daemon's user with
 no group or other permission bits. The socket is created with mode 0600
 (umask 0177 at creation, followed by an explicit `chmod`). A non-socket file at
-the path is never replaced, and a live socket is never taken over. See
+the path is never replaced. A socket that answers a probe connection is treated as
+live and is never taken over; one whose probe fails for any reason, including a
+timeout or a permission error, is treated as stale and removed. See
 [transport.md](transport.md#unix-socket-endpoints).
 
 ### 2. Peer credential check
@@ -126,13 +128,15 @@ Under the launchd service, standard output and standard error go to
 
 ### 8. Biometric approval per call
 
-The executor's design note says that `op` is run under a pseudo-terminal so it
-sees an interactive session on all three standard streams, and that without
-that, 1Password may reuse an earlier approval and skip the prompt. With the PTY
-each forwarded command is intended to trigger its own approval on the host. This
-is the primary authorization boundary: the daemon cannot approve a request on
-the user's behalf. Whether a prompt appears for every call also depends on the
-1Password application's own settings, which op-forward does not control.
+Biometric approval is behavior of the 1Password desktop application and `op`,
+not something op-forward enforces. The executor runs `op` under a pseudo-terminal
+so that it sees an interactive session on all three standard streams, which
+preserves the prompting behavior 1Password documents for a terminal session; the
+executor's design note records that without a terminal, 1Password may reuse an
+earlier approval and skip the prompt. This is the primary authorization boundary:
+the daemon cannot approve a request on the user's behalf. How often a prompt
+appears is controlled by the 1Password application's own settings, which
+op-forward does not control or verify.
 
 ### 9. Resource limits
 
@@ -180,8 +184,11 @@ access control. See [protocol.md](protocol.md#version-negotiation).
   capability.
 - **Binary integrity.** `op-forward update` and `scripts/install.sh` download
   release archives over HTTPS from GitHub; neither verifies a separate checksum
-  or signature. Packages from the APT, RPM, and Alpine repositories are signed
-  (see [development.md](development.md#package-repositories)).
+  or signature. The package repositories are signed in different ways: RPM and
+  Alpine packages carry per-package signatures (and the RPM and Alpine
+  repository metadata is signed), while for APT the `Release` and `InRelease`
+  files are signed and the individual `.deb` files are not. See
+  [development.md](development.md#package-repositories).
 - **Compromise of the host or the host user.** Out of scope.
 - **Revocation without restart.** The daemon has no revocation call; see
   [tokens.md](tokens.md#revoking-access).
@@ -200,8 +207,8 @@ access control. See [protocol.md](protocol.md#version-negotiation).
 - Review `~/Library/Logs/op-forward.log` and restrict who can read it.
 - Follow the procedure in [tokens.md](tokens.md#revoking-access) after removing a
   machine from the set of trusted clients.
-- Use package-manager updates on Linux hosts where a signed repository is
-  available.
+- Use package-manager updates on Linux hosts, where the repositories are signed
+  (see [What is not protected](#what-is-not-protected) for how).
 - Do not point a client at a host you do not control.
 
 ## See also

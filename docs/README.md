@@ -1,8 +1,8 @@
 # op-forward documentation
 
 op-forward forwards 1Password CLI (`op`) commands from VMs, containers, and
-remote SSH sessions to a macOS host, where the real `op` runs and Touch ID
-approves the request. The top-level [README](../README.md) is the quick start;
+remote SSH sessions to a macOS host, where the real `op` runs and the 1Password
+desktop application handles biometric approval (Touch ID). The top-level [README](../README.md) is the quick start;
 the pages here are the reference. They describe the code at the current release
 line (v0.7.x), and where a page and the code disagree, the code is correct.
 
@@ -41,7 +41,7 @@ Find a symptom, then the section that explains it.
 | One VM stops working after another refreshes | [tokens.md: Refresh endpoint behavior](tokens.md#refresh-endpoint-behavior) |
 | `refusing to bind to non-loopback address` | [transport.md: TCP endpoints](transport.md#tcp-endpoints) |
 | `socket ... is already in use`, `not a socket`, or a socket directory error | [deployment.md: Stale sockets](deployment.md#stale-sockets-and-address-in-use), [transport.md: Unix socket endpoints](transport.md#unix-socket-endpoints) |
-| `ssh -R` fails with `Address already in use` on a socket | [transport.md: Forwarding a Unix socket](transport.md#forwarding-a-unix-socket) |
+| `ssh -R` fails with `Address already in use` on a socket (OpenSSH error text, not produced by op-forward) | [transport.md: Forwarding a Unix socket](transport.md#forwarding-a-unix-socket) |
 | Unix socket path too long | [transport.md: Socket path length](transport.md#socket-path-length) |
 | Using op-forward from a Docker Desktop container | [transport.md: Docker Desktop containers](transport.md#docker-desktop-containers), [deployment.md](deployment.md#docker-desktop-containers) |
 | HTTP 426 or `below minimum required version` | [protocol.md: Version negotiation](protocol.md#version-negotiation), [deployment.md: 426](deployment.md#426-upgrade-required) |

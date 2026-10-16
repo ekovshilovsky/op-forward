@@ -105,9 +105,14 @@ Before binding, the daemon inspects the path with `Lstat`:
 | What is at the path | Result |
 |---|---|
 | Nothing | Bind proceeds |
-| A socket nothing is listening on | The file is removed and the bind proceeds ("stale socket") |
-| A socket that accepts a connection within 200 ms | Refused: `socket PATH is already in use by another daemon` |
+| A socket whose probe connection fails | The file is removed and the bind proceeds (treated as a "stale socket") |
+| A socket that accepts the probe connection within 200 ms | Refused: `socket PATH is already in use by another daemon` |
 | Anything that is not a socket (regular file, directory, symlink) | Refused: `PATH exists and is not a socket; refusing to replace it`. The file is never modified or removed |
+
+The distinction is made by a single probe, not by proof that nobody is
+listening. Any probe failure leads to removal, whatever its cause: connection
+refused, a timeout, or a permission error all count as "stale". A live listener
+that answers the probe within 200 ms is never removed.
 
 The daemon installs no signal handler, so a SIGTERM from `op-forward update`,
 `launchctl`, or a plain `kill` ends the process without closing the listener
@@ -118,7 +123,8 @@ second one finds the first one live and exits.
 ### Socket path length
 
 Unix socket paths have an operating-system limit: about 104 bytes on macOS
-(the limit documented in the source) and typically 108 on Linux. When a bind
+(the figure used in the source's error hint) and, per the platform's
+`sun_path` definition, typically 108 bytes on Linux. When a bind
 fails and the path is longer than 100 bytes, the error includes the hint
 `socket paths are limited to about 104 bytes on macOS; choose a shorter path`.
 For `ssh -R` forwarding, the limit applies to both ends independently, so both
@@ -156,9 +162,12 @@ or a permissive `StreamLocalBindMask` in sshd.
 ### What the check can and cannot see
 
 The kernel reports the identity of the process that opened the connection to
-the daemon's socket. Over `ssh -R` socket forwarding that process is the `ssh`
-client running on the host as the host user, not the process on the VM that
-connected to the forwarded socket. Consequently:
+the daemon's socket. This follows from how OpenSSH forwards streams: over
+`ssh -R` socket forwarding the host-side `ssh` client makes the local connection
+to the daemon's socket, so the process the kernel reports is that `ssh` client
+running as the host user, not the process on the VM that connected to the
+forwarded socket. The arrangement was exercised end to end during development.
+Consequently:
 
 - Every forwarded request arrives with the host user's uid. The peer check
   passes for all VM users; it cannot distinguish one VM user from another.
@@ -168,10 +177,10 @@ connected to the forwarded socket. Consequently:
 - The peer check is meaningful for processes that connect directly to the host
   socket, that is, other accounts on the host.
 
-This follows from how OpenSSH forwards streams and from the code above; the
-repository's tests exercise the check with direct connections and with injected
-peer uids ([peercred_test.go](../internal/endpoint/peercred_test.go),
-[transport_test.go](../internal/daemon/transport_test.go)), not through SSH.
+The repository's automated tests exercise the check with direct connections and
+with injected peer uids ([peercred_test.go](../internal/endpoint/peercred_test.go),
+[transport_test.go](../internal/daemon/transport_test.go)); they do not go
+through SSH.
 
 ## SSH remote forwarding
 
@@ -182,8 +191,9 @@ peer uids ([peercred_test.go](../internal/endpoint/peercred_test.go),
 ssh -R 18340:127.0.0.1:18340 <vm>
 ```
 
-The listening port appears on the VM's loopback interface (OpenSSH's default
-unless `GatewayPorts` is enabled on the VM's sshd). Any user on the VM can open
+Per the OpenSSH documentation, the listening port is bound to the VM's loopback
+interface unless `GatewayPorts` is enabled on the VM's sshd (it is off by
+default). Any user on the VM can open
 that port, so the bearer token is the only barrier between VM users. The VM
 side needs no endpoint configuration if it uses the default port.
 
@@ -193,8 +203,9 @@ For long-lived tunnels:
 ssh -fN -R 18340:127.0.0.1:18340 -o ControlMaster=no -o ControlPath=none <vm>
 ```
 
-`ControlMaster=no` matters when multiplexing is configured elsewhere:
-multiplexed sessions establish `RemoteForward` only on the first connection.
+`ControlMaster=no` matters when multiplexing is configured elsewhere: per the
+OpenSSH documentation, a multiplexed session reuses the first connection, so
+`RemoteForward` is established only by the first connection.
 
 ### Forwarding a Unix socket
 
@@ -214,22 +225,22 @@ export OP_FORWARD_ADDR="unix:///home/<vm-user>/.cache/op-forward/op-forward.sock
 Points to know:
 
 - **Leftover sockets on the VM.** sshd does not remove a forwarded socket when
-  the connection drops, so the next `ssh -R` fails with `Address already in
-  use`. Set `StreamLocalBindUnlink yes` in the VM's `/etc/ssh/sshd_config` so
+  the connection drops, so the next `ssh -R` fails with OpenSSH's `Address already
+  in use` error. Set `StreamLocalBindUnlink yes` in the VM's `/etc/ssh/sshd_config` so
   sshd replaces the stale file.
 - **Parent directory.** The VM-side directory must already exist; sshd does not
   create it.
 - **VM-side permissions.** sshd creates the VM-side socket using its
-  `StreamLocalBindMask` (OpenSSH's documented default is 0177, owner only).
-  Leave it restrictive.
+  `StreamLocalBindMask` (per the OpenSSH documentation the default is 0177,
+  owner only). Leave it restrictive.
 - **Path lengths.** See [Socket path length](#socket-path-length).
 - **Host-side rules.** The host path must satisfy the directory and permission
   rules above. `~/Library/Caches/op-forward` on macOS satisfies them because the
   daemon creates it with mode 0700 when it writes the token files, provided the
   directory did not already exist with looser permissions.
 
-The `ssh` options named here are OpenSSH behavior, not behavior implemented or
-tested in this repository.
+The `ssh` and `sshd` options named here are OpenSSH behavior as documented by
+OpenSSH, not behavior implemented in this repository.
 
 ## Docker Desktop containers
 
@@ -245,12 +256,13 @@ export OP_FORWARD_ADDR=tcp://host.docker.internal:18340
 
 The daemon stays bound to `127.0.0.1`; Docker Desktop routes the name to the
 host, so no SSH tunnel is needed. This is the case that motivated the dial-side
-exception to loopback-only addressing.
+exception to loopback-only addressing. Reachability through `host.docker.internal`
+was verified empirically against Docker Desktop during development.
 
-Use TCP for containers. The project's finding is that a Unix socket on the host
-cannot be bind-mounted into a Docker Desktop container: `docker run` fails at
-mount time with `operation not supported`, so a `unix://` endpoint cannot serve
-a container on that platform. The container still needs the token files; see
+Use TCP for containers. A Unix socket on the host cannot be bind-mounted into a
+Docker Desktop container: `docker run` fails at mount time with `operation not
+supported`, so a `unix://` endpoint cannot serve a container on that platform.
+This too was verified empirically against Docker Desktop during development. The container still needs the token files; see
 [deployment.md](deployment.md#docker-desktop-containers).
 
 ## Dial side behavior

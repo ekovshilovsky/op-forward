@@ -3,8 +3,8 @@
 op-forward authenticates every `/op/execute` request with a bearer token. The
 tokens are credentials for the op-forward daemon only; they are unrelated to
 1Password credentials, and they do not grant access to anything except the
-ability to ask the daemon to run `op` (which still requires approval on the
-host). The implementation is in [internal/auth/token.go](../internal/auth/token.go),
+ability to ask the daemon to run `op` (any approval prompt is then governed by
+the 1Password desktop application on the host, not by these tokens). The implementation is in [internal/auth/token.go](../internal/auth/token.go),
 the client logic in [cmd/proxy.go](../cmd/proxy.go), and the refresh handler in
 [internal/daemon/server.go](../internal/daemon/server.go).
 
@@ -67,7 +67,10 @@ directory. Because the daemon and the proxy resolve paths the same way, setting
 the variable affects where each side reads and writes its access token.
 
 If the user cache directory cannot be determined (for example when `HOME` is
-unset), the proxy falls back to `~/.cache/op-forward`.
+unset), the proxy builds the path from the home directory lookup, whose error it
+ignores. With no home directory the result is the relative path
+`.cache/op-forward/<file>`, which resolves against the proxy's current working
+directory rather than a fixed location.
 
 The launchd service does not copy the installing shell's environment, so
 `OP_FORWARD_TOKEN_DIR` and `OP_FORWARD_TOKEN_FILE` exported before
@@ -105,7 +108,9 @@ which tokens the running daemon accepts.
 1. Read `access.token` (or the path in `OP_FORWARD_TOKEN_FILE`). If it is absent,
    read `session.token` instead.
 2. If neither file yields a value, check that `refresh.token` has a value. If it
-   does not, print the "no authentication token found" error and exit 127.
+   does not, print the "no authentication token found" error and exit 127. The
+   same error is printed later, at the refresh step, whenever a refresh is needed
+   and neither `refresh.token` nor `session.token` supplies a value.
 3. Probe the endpoint; exit 127 if nothing answers.
 4. If an access token was read and its stored expiry is in the future, send the
    request with it.
@@ -221,15 +226,25 @@ behavior](#refresh-endpoint-behavior).
 
 ### no authentication token found
 
-The proxy found no `access.token`, no `session.token`, and no `refresh.token`
-value. Deploy `refresh.token` as above. The message says this is not a
+The proxy needed a refresh token and could not find one. This happens in two
+situations:
+
+- no usable credential files exist: there is no `access.token` or
+  `session.token` value and no `refresh.token` value; or
+- an access token exists but is expired (or its expiry line is missing or
+  unparsable), so a refresh is required, and neither `refresh.token` nor
+  `session.token` supplies a value to refresh with.
+
+In both cases deploy `refresh.token` as above. The message says this is not a
 1Password problem; it concerns the op-forward credential files.
 
 ### Daemon returns 401 for the access token
 
 This is the normal signal to refresh and is handled silently. If the retry with
-the new access token also returns a non-200 status, the proxy prints `daemon
-returned HTTP 401` and exits 127.
+the new access token returns a non-200 status, the proxy handles it like any other
+reply: it prints `daemon returned HTTP N` with the status actually received and
+exits 127, and a 426 takes the upgrade-required branch (it prints the response
+body and exits 127). The status is not necessarily 401.
 
 ## Revoking access
 
