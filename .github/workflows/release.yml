@@ -39,11 +39,16 @@ jobs:
           go-version-file: go.mod
 
       - name: Resolve release version
+        env:
+          # The dispatch input is passed through the environment rather than
+          # interpolated into the script, so its value can never be executed
+          # as shell.
+          VERSION_INPUT: ${VERSION_INPUT}
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            echo "TAG_NAME=v${{ inputs.version }}" >> "$GITHUB_ENV"
+            echo "TAG_NAME=v${VERSION_INPUT}" >> "$GITHUB_ENV"
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
-            echo "Dry run: building as v${{ inputs.version }}, nothing will be published"
+            echo "Dry run: building as v${VERSION_INPUT}, nothing will be published"
           else
             echo "TAG_NAME=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
             echo "DRY_RUN=false" >> "$GITHUB_ENV"

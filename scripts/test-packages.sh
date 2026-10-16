@@ -67,8 +67,12 @@ run debian debian:bookworm-slim \
     "dpkg -i /pkg/op-forward_${VERSION}_${ARCH}.deb"
 run fedora fedora:latest \
     "rpm -i --nosignature /pkg/op-forward-${VERSION}-1.${RPM_ARCH}.rpm"
+# bash is installed first because the pre-0.7.2 shim this test plants uses a
+# bash shebang, exactly as op-forward wrote it back then. Without bash the
+# shim exits 127 for the wrong reason (missing interpreter) and the repair
+# assertion below passes vacuously.
 run alpine alpine:latest \
-    "apk add --allow-untrusted /pkg/op-forward_${VERSION}_${RPM_ARCH}.apk"
+    "apk add -q bash && apk add --allow-untrusted /pkg/op-forward_${VERSION}_${RPM_ARCH}.apk"
 if [ "$ARCH" = amd64 ]; then
     run archlinux archlinux:latest \
         "pacman -U --noconfirm /pkg/op-forward-${VERSION}-1-${ARCH_ARCH}.pkg.tar.zst >/dev/null"
