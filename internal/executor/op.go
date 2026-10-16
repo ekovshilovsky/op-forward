@@ -132,15 +132,23 @@ func Execute(req *Request) (*Result, error) {
 
 	// Wait for the command to finish
 	err = cmd.Wait()
+
+	// The context cancels a running command by killing it, so a timed-out
+	// child reaches this point as an *exec.ExitError with exit status -1,
+	// not as a bare context error. The deadline must be consulted before
+	// the exit status is interpreted, or the timeout contract (exit 124)
+	// is unreachable and clients see the killed child's raw status instead.
+	if ctx.Err() == context.DeadlineExceeded {
+		return &Result{
+			Stderr:   "command timed out",
+			ExitCode: 124,
+		}, nil
+	}
+
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
-			return &Result{
-				Stderr:   "command timed out",
-				ExitCode: 124,
-			}, nil
 		} else {
 			return nil, fmt.Errorf("executing op: %w", err)
 		}
