@@ -91,38 +91,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # The release workflow also writes to gh-pages (package
-          # repositories at the site root), so this step only touches /report
-          # and rebases onto any concurrent push before publishing.
-          if [ -n "$(git ls-remote --heads origin gh-pages)" ]; then
-            git clone --branch gh-pages --single-branch \
-              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/repo
-          else
-            mkdir -p /tmp/repo
-            git -C /tmp/repo init -b gh-pages
-            git -C /tmp/repo remote add origin \
-              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          fi
-
-          mkdir -p /tmp/repo/report
-          cp report-out/index.html report-out/badge.json /tmp/repo/report/
-
+          # repositories at the site root), so this step only touches
+          # /report. The report is a generated, latest-wins artifact: on a
+          # contested push the commit is rebuilt on top of the current
+          # remote tip and pushed again. Rebasing is deliberately avoided,
+          # because two publishes rewrite the same generated files and a
+          # rebase between them conflicts by construction.
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git init -q -b gh-pages /tmp/repo
+          git -C /tmp/repo remote add origin "$REMOTE"
           git -C /tmp/repo config user.name "github-actions[bot]"
           git -C /tmp/repo config user.email "github-actions[bot]@users.noreply.github.com"
-          git -C /tmp/repo add -A
-          git -C /tmp/repo diff --cached --quiet \
-            || git -C /tmp/repo commit -m "Update report card for ${GITHUB_SHA::7}"
-          # Fresh branches have nothing to rebase onto. The release workflow
-          # also pushes gh-pages, and no concurrency group spans workflows,
-          # so a rejected push is rebased and retried a few times before
-          # giving up.
+
           for attempt in 1 2 3; do
             if [ -n "$(git -C /tmp/repo ls-remote --heads origin gh-pages)" ]; then
-              git -C /tmp/repo pull --rebase origin gh-pages
+              git -C /tmp/repo fetch -q origin gh-pages
+              git -C /tmp/repo reset -q --hard origin/gh-pages
             fi
+            mkdir -p /tmp/repo/report
+            cp report-out/index.html report-out/badge.json /tmp/repo/report/
+            git -C /tmp/repo add -A
+            if git -C /tmp/repo diff --cached --quiet; then
+              echo "published report already matches; nothing to push"
+              exit 0
+            fi
+            git -C /tmp/repo commit -q -m "Update report card for ${GITHUB_SHA::7}"
             if git -C /tmp/repo push origin HEAD:gh-pages; then
               exit 0
             fi
-            echo "push rejected (attempt ${attempt}); rebasing and retrying"
+            echo "push rejected (attempt ${attempt}); rebuilding on the new tip"
           done
           echo "could not push the report after 3 attempts" >&2
           exit 1
