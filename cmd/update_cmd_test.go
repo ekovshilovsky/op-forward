@@ -470,7 +470,9 @@ func TestRestartDaemonReportsSignalFailure(t *testing.T) {
 // ---------- runUpdate (paths that stop before replacing the binary) ----------
 
 // runUpdate would overwrite the running test binary if it ever reached
-// replaceBinary, so only the paths that return earlier are exercised here.
+// replaceBinaryAt, so only the paths that return earlier are exercised here;
+// the replacement flow itself is driven against temp paths in
+// update_perform_test.go.
 func TestExecuteUpdateReportsAlreadyUpToDate(t *testing.T) {
 	withVersion(t, "1.2.3-test")
 	stub := fakeGitHub(t, releaseJSONFor(t, "v1.2.3-test"), nil)

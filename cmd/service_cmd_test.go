@@ -322,8 +322,9 @@ func TestExecuteServiceDispatchesToServiceCommand(t *testing.T) {
 }
 
 // Off macOS the service commands must refuse before touching the filesystem.
-// This test can only run on a non-darwin host: the platform check reads
-// runtime.GOOS directly, which cannot be substituted.
+// This test exercises the real runService entry point and so only runs on a
+// non-darwin host; dispatchService covers the routing on every platform in
+// service_dispatch_test.go.
 func TestRunServiceRefusesOutsideMacOSBeforeWritingFiles(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("exercises the non-macOS refusal, which is unreachable on darwin")
