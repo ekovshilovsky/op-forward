@@ -433,10 +433,10 @@ if [ "$GATE" = true ] && [ -s "$WORK/pkgcov.txt" ]; then
         case "$1" in
             main)               echo 85 ;;
             cmd)                echo 98 ;;
-            internal/auth)      echo 96 ;;
+            internal/auth)      echo 98 ;;
             internal/daemon)    echo 95 ;;
-            internal/endpoint)  echo 90 ;;
-            internal/executor)  echo 93 ;;
+            internal/endpoint)  echo 93 ;;
+            internal/executor)  echo 97 ;;
             internal/version)   echo 100 ;;
             *)                  echo "" ;;
         esac
