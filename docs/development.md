@@ -2,7 +2,7 @@
 
 This page covers building and testing op-forward, the packaging pipeline, the
 package repositories, and the release and recovery workflows. The current release
-line is v0.7.x (latest tag v0.7.3).
+line is v1.x (latest tag v1.0.0).
 
 ## Requirements
 
@@ -23,8 +23,8 @@ has platform files for each ([pty_darwin.go](../internal/executor/pty_darwin.go)
 
 ```bash
 make build                 # ./op-forward for this platform
-make build VERSION=0.7.3   # stamp a version
-make build-all VERSION=0.7.3
+make build VERSION=1.0.0   # stamp a version
+make build-all VERSION=1.0.0
 make test
 make clean
 ```
@@ -83,8 +83,8 @@ keeping ownership and mode.
 ### Building packages
 
 ```bash
-make build-all VERSION=0.7.3
-scripts/build-packages.sh 0.7.3 dist pkg-out
+make build-all VERSION=1.0.0
+scripts/build-packages.sh 1.0.0 dist pkg-out
 ```
 
 [scripts/build-packages.sh](../scripts/build-packages.sh) takes the version, the
@@ -103,7 +103,7 @@ for each of `deb`, `rpm`, `apk`, and `archlinux`. Output names:
 ### Testing packages
 
 ```bash
-scripts/test-packages.sh 0.7.3 pkg-out [arch]
+scripts/test-packages.sh 1.0.0 pkg-out [arch]
 ```
 
 [scripts/test-packages.sh](../scripts/test-packages.sh) is the acceptance test. For

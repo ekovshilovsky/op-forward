@@ -291,10 +291,10 @@ Linux packages are defined once in `nfpm.yaml` and built with
 [nfpm](https://nfpm.goreleaser.com):
 
 ```bash
-make build-all VERSION=0.7.2
-scripts/build-packages.sh 0.7.2 dist pkg-out      # deb, rpm, apk, Arch for amd64 and arm64
-scripts/test-packages.sh 0.7.2 pkg-out            # install each in its distribution container
-scripts/build-aur.sh 0.7.2 aur-out --verify       # PKGBUILD + .SRCINFO for op-forward-bin, built in an Arch container
+make build-all VERSION=1.0.0
+scripts/build-packages.sh 1.0.0 dist pkg-out      # deb, rpm, apk, Arch for amd64 and arm64
+scripts/test-packages.sh 1.0.0 pkg-out            # install each in its distribution container
+scripts/build-aur.sh 1.0.0 aur-out --verify       # PKGBUILD + .SRCINFO for op-forward-bin, built in an Arch container
 ```
 
 The release workflow runs all of these; with `AUR_SSH_PRIVATE_KEY` configured it
