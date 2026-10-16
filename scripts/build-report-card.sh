@@ -185,7 +185,10 @@ lint_count=$(count_lines "$WORK/lint.txt")
 # JSON report.
 gosec -fmt=json -quiet -no-fail -out="$WORK/gosec.json" ./... > /dev/null 2> "$WORK/gosec.err" \
     || { cat "$WORK/gosec.err" >&2; die "gosec failed to run"; }
-[ -f "$WORK/gosec.json" ] || die "gosec produced no report"
+# With zero findings and -quiet, gosec exits 0 without writing a report at
+# all, so a missing file after a successful run means a clean result, not a
+# failure.
+[ -f "$WORK/gosec.json" ] || : > "$WORK/gosec.json"
 gosec_high=$(count_matches '"severity": *"HIGH"' "$WORK/gosec.json")
 gosec_medium=$(count_matches '"severity": *"MEDIUM"' "$WORK/gosec.json")
 gosec_low=$(count_matches '"severity": *"LOW"' "$WORK/gosec.json")
