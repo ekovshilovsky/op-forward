@@ -64,23 +64,44 @@ func xmlText(s string) string {
 }
 
 func runService() error {
-	if len(os.Args) < 3 {
+	return dispatchService(runtime.GOOS, os.Args)
+}
+
+// dispatchService routes the service subcommand found in args, where args has
+// the shape of os.Args. Service management is launchd-based, so any goos other
+// than "darwin" is refused before a subcommand is acted on.
+func dispatchService(goos string, args []string) error {
+	if len(args) < 3 {
 		fmt.Println("Usage: op-forward service [install|uninstall]")
 		return nil
 	}
 
-	if runtime.GOOS != "darwin" {
+	if goos != "darwin" {
 		return fmt.Errorf("service management is only supported on macOS")
 	}
 
-	switch os.Args[2] {
+	switch args[2] {
 	case "install":
 		return serviceInstall()
 	case "uninstall":
 		return serviceUninstall()
 	default:
-		return fmt.Errorf("unknown service command: %s", os.Args[2])
+		return fmt.Errorf("unknown service command: %s", args[2])
 	}
+}
+
+// defaultLaunchdUID is the user ID of the first account created on macOS. It
+// addresses the GUI domain when the current user cannot be determined.
+const defaultLaunchdUID = "501"
+
+// launchdUID returns the user ID that addresses the per-user launchd GUI
+// domain. An empty uid, which is what an unresolvable current user yields,
+// selects defaultLaunchdUID.
+func launchdUID(uid string) string {
+	if uid == "" {
+		return defaultLaunchdUID
+	}
+	return uid
 }
 
 func serviceInstall() error {
@@ -133,15 +154,13 @@ func serviceInstall() error {
 		if u, uerr := user.Current(); uerr == nil {
 			uid = u.Uid
 		}
-		if uid == "" {
-			uid = "501"
-		}
+		domain := fmt.Sprintf("gui/%s", launchdUID(uid))
 		// As with the unload above, a failed bootout only means nothing was
 		// bootstrapped for this user yet, so its result is discarded.
 		// #nosec G204 -- fixed launchctl binary name; the domain target is built from the uid reported by user.Current (or the default 501) and the plist path is one this process just wrote
-		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s", uid), plistPath).Run()
+		_ = exec.Command("launchctl", "bootout", domain, plistPath).Run()
 		// #nosec G204 -- fixed launchctl binary name; the domain target is built from the uid reported by user.Current (or the default 501) and the plist path is one this process just wrote
-		bootstrapErr := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%s", uid), plistPath).Run()
+		bootstrapErr := exec.Command("launchctl", "bootstrap", domain, plistPath).Run()
 		if bootstrapErr != nil {
 			return fmt.Errorf("loading launchd service: %w", bootstrapErr)
 		}

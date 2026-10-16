@@ -34,7 +34,23 @@ type githubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+// daemonRespawnTimeout bounds how long an update waits for the respawned
+// daemon to answer its health endpoint.
+const daemonRespawnTimeout = 30 * time.Second
+
 func runUpdate() error {
+	return performUpdate(resolveExecutable, daemonRespawnTimeout)
+}
+
+// performUpdate runs the update workflow: it looks up the latest release,
+// downloads the archive for this platform, replaces the binary at the path
+// reported by resolve, and restarts the daemon when one is running.
+//
+// resolve is invoked only after the download has succeeded, so an up-to-date
+// installation or a failed download never depends on locating the running
+// executable. healthTimeout bounds how long the restarted daemon has to
+// answer its health endpoint.
+func performUpdate(resolve func() (string, error), healthTimeout time.Duration) error {
 	fmt.Printf("Current version: %s\n", Version)
 	fmt.Println("Checking for updates...")
 
@@ -56,8 +72,11 @@ func runUpdate() error {
 		return err
 	}
 
-	execPath, err := replaceBinary(newBinary)
+	execPath, err := resolve()
 	if err != nil {
+		return err
+	}
+	if err := replaceBinaryAt(execPath, newBinary); err != nil {
 		return err
 	}
 
@@ -71,7 +90,7 @@ func runUpdate() error {
 		if err != nil {
 			return err
 		}
-		if err := waitForHealth(ep, 30*time.Second); err != nil {
+		if err := waitForHealth(ep, healthTimeout); err != nil {
 			return fmt.Errorf("daemon did not come back on %s: %w\nCheck ~/Library/Logs/op-forward.log or restart with: launchctl kickstart -k gui/$(id -u)/com.op-forward.daemon", ep, err)
 		}
 		fmt.Printf("Daemon is serving again on %s\n", ep)
@@ -160,9 +179,9 @@ func downloadReleaseBinary(release *githubRelease, version string) ([]byte, erro
 	return extractBinaryFromTarGz(resp.Body)
 }
 
-// replaceBinary atomically replaces the running binary with new contents.
-// Returns the resolved path of the replaced binary.
-func replaceBinary(newBinary []byte) (string, error) {
+// resolveExecutable returns the symlink-resolved path of the running
+// binary, which is the file an update must replace.
+func resolveExecutable() (string, error) {
 	execPath, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("determining binary path: %w", err)
@@ -171,19 +190,25 @@ func replaceBinary(newBinary []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving binary path: %w", err)
 	}
+	return execPath, nil
+}
 
+// replaceBinaryAt replaces the file at execPath with newBinary. The contents
+// are staged in a sibling file and renamed over the target, so the target
+// path never holds a partially written binary.
+func replaceBinaryAt(execPath string, newBinary []byte) error {
 	tmpPath := execPath + ".update"
 	// #nosec G306 -- the staged file replaces the running executable and must carry the execute bit; it is written beside the existing binary in a location the invoking user already controls
 	if err := os.WriteFile(tmpPath, newBinary, 0755); err != nil {
-		return "", fmt.Errorf("writing update: %w", err)
+		return fmt.Errorf("writing update: %w", err)
 	}
 	if err := os.Rename(tmpPath, execPath); err != nil {
 		// Best-effort removal of the staged file; the rename failure
 		// returned below is the actionable error.
 		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("replacing binary: %w", err)
+		return fmt.Errorf("replacing binary: %w", err)
 	}
-	return execPath, nil
+	return nil
 }
 
 // restartDaemon sends SIGTERM to the running op-forward daemon so launchd
