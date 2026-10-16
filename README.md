@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ekovshilovsky/op-forward/actions/workflows/ci.yml/badge.svg)](https://github.com/ekovshilovsky/op-forward/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ekovshilovsky/op-forward)](https://github.com/ekovshilovsky/op-forward/releases/latest)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ekovshilovsky/op-forward)](https://goreportcard.com/report/github.com/ekovshilovsky/op-forward)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ekovshilovsky/op-forward.svg)](https://pkg.go.dev/github.com/ekovshilovsky/op-forward)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ekovshilovsky/op-forward)](go.mod)
 
@@ -300,3 +300,7 @@ also pushes the generated `PKGBUILD` to the AUR as `op-forward-bin`.
 ## License
 
 MIT
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. Report security issues privately as described in [SECURITY.md](SECURITY.md).

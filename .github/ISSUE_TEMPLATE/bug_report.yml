@@ -1,0 +1,74 @@
+name: Bug report
+description: Report something that is not working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For security issues, do not use this form; use the private advisory link on the issue chooser page.
+  - type: input
+    id: host-version
+    attributes:
+      label: op-forward version on the host
+      description: Output of `op-forward version` on the macOS host.
+    validations:
+      required: true
+  - type: input
+    id: remote-version
+    attributes:
+      label: op-forward version on the remote
+      description: Output of `op-forward version` on the VM or container.
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - Homebrew
+        - APT
+        - dnf
+        - apk
+        - pacman
+        - tarball
+        - source
+    validations:
+      required: true
+  - type: input
+    id: host-os
+    attributes:
+      label: Host OS and version
+      placeholder: macOS 15.1
+    validations:
+      required: true
+  - type: input
+    id: remote-env
+    attributes:
+      label: Remote environment
+      description: VM manager or container runtime, and distribution.
+      placeholder: Colima, Ubuntu 24.04
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport in use
+      options:
+        - tcp://
+        - unix://
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Include the command you ran and its exit code. Exit code 127 means the shim could not reach the daemon.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        WARNING: Redact bearer token values and any vault, item, or secret contents before pasting.
+      render: shell
