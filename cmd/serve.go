@@ -43,10 +43,7 @@ func runServe() error {
 	fmt.Printf("Refresh token at: %s\n", refreshPath)
 
 	// Always generate a fresh access token on startup (1-hour TTL).
-	accessToken, err := auth.GenerateAccess()
-	if err != nil {
-		return fmt.Errorf("access token setup: %w", err)
-	}
+	accessToken := auth.GenerateAccess()
 	accessPath, _ := auth.AccessTokenPath()
 	if err := auth.SaveToPath(accessToken, accessPath); err != nil {
 		return fmt.Errorf("saving access token: %w", err)

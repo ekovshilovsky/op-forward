@@ -33,25 +33,28 @@ type Token struct {
 }
 
 // GenerateAccess creates a new random access token with a 1-hour TTL.
-func GenerateAccess() (*Token, error) {
+func GenerateAccess() *Token {
 	return generate(AccessTokenTTL)
 }
 
 // GenerateRefresh creates a new random refresh token with a 30-day TTL.
-func GenerateRefresh() (*Token, error) {
+func GenerateRefresh() *Token {
 	return generate(RefreshTokenTTL)
 }
 
-func generate(ttl time.Duration) (*Token, error) {
+func generate(ttl time.Duration) *Token {
 	b := make([]byte, TokenLength)
-	if _, err := rand.Read(b); err != nil {
-		return nil, fmt.Errorf("generating token: %w", err)
-	}
+	// Since Go 1.24, crypto/rand.Read never returns an error: the runtime
+	// aborts the program if randomness is unavailable, so a token can never
+	// be built from unfilled bytes. The go directive in go.mod enforces a
+	// newer minimum at build time, which makes this guarantee load-bearing
+	// rather than assumed.
+	_, _ = rand.Read(b)
 	return &Token{
 		Value:   hex.EncodeToString(b),
 		Expires: time.Now().Add(ttl),
 		TTL:     ttl,
-	}, nil
+	}
 }
 
 // IsValid returns true if the token hasn't expired.
@@ -191,10 +194,7 @@ func LoadOrGenerateRefresh() (*Token, bool, error) {
 		t.TTL = RefreshTokenTTL
 		return t, false, nil
 	}
-	t, err = GenerateRefresh()
-	if err != nil {
-		return nil, false, err
-	}
+	t = GenerateRefresh()
 	if err := SaveToPath(t, path); err != nil {
 		return nil, false, err
 	}
@@ -239,10 +239,7 @@ func LoadOrGenerate() (*Token, bool, error) {
 		token.TTL = AccessTokenTTL
 		return token, false, nil
 	}
-	token, err = GenerateAccess()
-	if err != nil {
-		return nil, false, err
-	}
+	token = GenerateAccess()
 	if err := token.Save(); err != nil {
 		return nil, false, err
 	}

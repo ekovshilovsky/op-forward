@@ -239,10 +239,7 @@ func TestMigrateLegacyToken_UnwritableRefreshPathReturnsError(t *testing.T) {
 	t.Setenv("OP_FORWARD_TOKEN_DIR", tmpDir)
 
 	legacyPath := filepath.Join(tmpDir, LegacyTokenFile)
-	legacy, err := GenerateRefresh()
-	if err != nil {
-		t.Fatal(err)
-	}
+	legacy := GenerateRefresh()
 	if err := SaveToPath(legacy, legacyPath); err != nil {
 		t.Fatalf("saving fixture legacy token: %v", err)
 	}

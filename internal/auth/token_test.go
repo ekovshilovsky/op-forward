@@ -8,10 +8,7 @@ import (
 )
 
 func TestGenerateAccess(t *testing.T) {
-	token, err := GenerateAccess()
-	if err != nil {
-		t.Fatalf("GenerateAccess() error: %v", err)
-	}
+	token := GenerateAccess()
 	if len(token.Value) != TokenLength*2 {
 		t.Errorf("token length = %d, want %d hex chars", len(token.Value), TokenLength*2)
 	}
@@ -24,10 +21,7 @@ func TestGenerateAccess(t *testing.T) {
 }
 
 func TestGenerateRefresh(t *testing.T) {
-	token, err := GenerateRefresh()
-	if err != nil {
-		t.Fatalf("GenerateRefresh() error: %v", err)
-	}
+	token := GenerateRefresh()
 	if len(token.Value) != TokenLength*2 {
 		t.Errorf("token length = %d, want %d hex chars", len(token.Value), TokenLength*2)
 	}
@@ -37,8 +31,8 @@ func TestGenerateRefresh(t *testing.T) {
 }
 
 func TestGenerateUniqueness(t *testing.T) {
-	t1, _ := GenerateAccess()
-	t2, _ := GenerateAccess()
+	t1 := GenerateAccess()
+	t2 := GenerateAccess()
 	if t1.Value == t2.Value {
 		t.Error("two generated tokens should not be identical")
 	}
@@ -108,7 +102,7 @@ func TestSaveToPathAndLoadFromPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.token")
 
-	original, _ := GenerateAccess()
+	original := GenerateAccess()
 	if err := SaveToPath(original, path); err != nil {
 		t.Fatalf("SaveToPath() error: %v", err)
 	}
@@ -130,7 +124,7 @@ func TestSaveToPath_AtomicWrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "atomic.token")
 
-	token, _ := GenerateAccess()
+	token := GenerateAccess()
 	if err := SaveToPath(token, path); err != nil {
 		t.Fatalf("SaveToPath() error: %v", err)
 	}
@@ -153,7 +147,7 @@ func TestSaveAndLoad_BackwardCompat(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("OP_FORWARD_TOKEN_FILE", filepath.Join(tmpDir, "test.token"))
 
-	original, _ := GenerateAccess()
+	original := GenerateAccess()
 	if err := original.Save(); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
@@ -227,7 +221,7 @@ func TestLoadOrGenerate_ExistingValid(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("OP_FORWARD_TOKEN_FILE", filepath.Join(tmpDir, "test.token"))
 
-	first, _ := GenerateAccess()
+	first := GenerateAccess()
 	if err := first.Save(); err != nil {
 		t.Fatalf("saving fixture token: %v", err)
 	}
@@ -286,7 +280,7 @@ func TestLoadOrGenerateRefresh_ExistingValid(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("OP_FORWARD_TOKEN_DIR", tmpDir)
 
-	first, _ := GenerateRefresh()
+	first := GenerateRefresh()
 	path := filepath.Join(tmpDir, RefreshTokenFile)
 	if err := SaveToPath(first, path); err != nil {
 		t.Fatalf("saving fixture refresh token: %v", err)
@@ -309,7 +303,7 @@ func TestMigrateLegacyToken(t *testing.T) {
 	t.Setenv("OP_FORWARD_TOKEN_DIR", tmpDir)
 
 	// Write a legacy session.token.
-	legacy, _ := GenerateRefresh()
+	legacy := GenerateRefresh()
 	legacyPath := filepath.Join(tmpDir, LegacyTokenFile)
 	if err := SaveToPath(legacy, legacyPath); err != nil {
 		t.Fatalf("saving fixture legacy token: %v", err)
@@ -335,13 +329,13 @@ func TestMigrateLegacyToken_NoOpIfRefreshExists(t *testing.T) {
 	t.Setenv("OP_FORWARD_TOKEN_DIR", tmpDir)
 
 	// Write both files.
-	refresh, _ := GenerateRefresh()
+	refresh := GenerateRefresh()
 	refreshPath := filepath.Join(tmpDir, RefreshTokenFile)
 	if err := SaveToPath(refresh, refreshPath); err != nil {
 		t.Fatalf("saving fixture refresh token: %v", err)
 	}
 
-	legacy, _ := GenerateRefresh()
+	legacy := GenerateRefresh()
 	legacyPath := filepath.Join(tmpDir, LegacyTokenFile)
 	if err := SaveToPath(legacy, legacyPath); err != nil {
 		t.Fatalf("saving fixture legacy token: %v", err)
@@ -413,7 +407,7 @@ func TestTokenFilePermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.token")
 
-	token, _ := GenerateAccess()
+	token := GenerateAccess()
 	if err := SaveToPath(token, path); err != nil {
 		t.Fatalf("saving fixture token: %v", err)
 	}

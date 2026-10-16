@@ -88,11 +88,9 @@ func runProxy() error {
 		Args:      args,
 		TimeoutMs: *timeoutMs,
 	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "op-forward: encoding request: %v\n", err)
-		return ExitStatus(proxyExitInfraFailure)
-	}
+	// Marshaling a struct of a string slice and an int cannot fail, so the
+	// error is discarded rather than guarded with unreachable handling.
+	bodyBytes, _ := json.Marshal(reqBody)
 
 	httpTimeout := time.Duration(*timeoutMs)*time.Millisecond + 5*time.Second
 	client := ep.HTTPClient(httpTimeout)
@@ -304,10 +302,9 @@ func readToken(path string) (value string, valid bool) {
 	if err != nil {
 		return "", false
 	}
+	// SplitN with a positive count always yields at least one element, so
+	// the first line can be taken unconditionally.
 	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
-	if len(lines) == 0 {
-		return "", false
-	}
 	val := lines[0]
 	if len(lines) < 2 {
 		return val, false
