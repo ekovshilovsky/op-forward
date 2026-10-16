@@ -229,21 +229,10 @@ func (s *Server) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate new access token.
-	newAccess, err := auth.GenerateAccess()
-	if err != nil {
-		log.Printf("[op-forward] error generating access token during refresh: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	// Rotate the refresh token — new value and extended expiry.
-	newRefresh, err := auth.GenerateRefresh()
-	if err != nil {
-		log.Printf("[op-forward] error generating refresh token during refresh: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
+	// Generate a new access token and rotate the refresh token — new value
+	// and extended expiry.
+	newAccess := auth.GenerateAccess()
+	newRefresh := auth.GenerateRefresh()
 
 	// Persist both tokens to disk before updating in-memory state.
 	if path, err := auth.AccessTokenPath(); err == nil {

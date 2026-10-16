@@ -432,9 +432,9 @@ if [ "$GATE" = true ] && [ -s "$WORK/pkgcov.txt" ]; then
     floor_for() {
         case "$1" in
             main)               echo 85 ;;
-            cmd)                echo 96 ;;
-            internal/auth)      echo 92 ;;
-            internal/daemon)    echo 89 ;;
+            cmd)                echo 98 ;;
+            internal/auth)      echo 96 ;;
+            internal/daemon)    echo 95 ;;
             internal/endpoint)  echo 90 ;;
             internal/executor)  echo 93 ;;
             internal/version)   echo 100 ;;
