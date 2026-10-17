@@ -83,6 +83,15 @@ present a valid bearer token.
    `socket directory /tmp is mode 0777; it must be 0700 so other users cannot
    reach the socket`.
 
+   The directory check runs before the path-length check, because it is a
+   security refusal that must hold before anything is bound. When both
+   problems exist, which is the usual case for a long path under a shared
+   directory such as `/tmp`, the error reports both: the directory refusal
+   followed by `; also, socket paths are limited to about 104 bytes on macOS;
+   choose a shorter path`. Choose a private directory with a short path and
+   both are fixed in one edit. This is pinned by
+   `TestListenUnixOverlongPathInSharedDirectoryReportsBothProblems`.
+
 Only the immediate parent is checked. The check applies on the machine where
 the daemon runs; the VM-side socket created by `ssh -R` is governed by sshd (see
 [Forwarding a Unix socket](#forwarding-a-unix-socket)).

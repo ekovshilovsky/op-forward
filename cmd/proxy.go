@@ -316,23 +316,35 @@ func readToken(path string) (value string, valid bool) {
 	return val, time.Now().Before(expires)
 }
 
-// saveTokenFile writes a token value and expiry to disk atomically.
-func saveTokenFile(path, value, expires string) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		fmt.Fprintf(os.Stderr, "op-forward: warning: could not cache token at %s: %v\n", path, err)
-		return
+// writeTokenFile writes a token value and expiry to disk atomically: the
+// token directory is created with mode 0700 and the file with mode 0600, via
+// a temporary file renamed into place so a reader never sees a partial token.
+// It is the single persistence primitive for tokens the client side receives,
+// shared by the proxy (which treats a failure as a warning) and by doctor
+// (which must surface it, because a refresh rotates the refresh token).
+func writeTokenFile(path, value, expires string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
 	}
 	content := fmt.Sprintf("%s\n%s\n", value, expires)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(content), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "op-forward: warning: could not cache token at %s: %v\n", path, err)
-		return
+		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		// Best-effort removal of the staged temp file; the rename failure
-		// reported below is the actionable error.
+		// returned below is the actionable error.
 		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// saveTokenFile persists a token and downgrades a failure to a warning, which
+// is the proxy's behavior: the freshly issued access token is still held in
+// memory and usable for the request in flight even if caching it failed.
+func saveTokenFile(path, value, expires string) {
+	if err := writeTokenFile(path, value, expires); err != nil {
 		fmt.Fprintf(os.Stderr, "op-forward: warning: could not cache token at %s: %v\n", path, err)
 	}
 }

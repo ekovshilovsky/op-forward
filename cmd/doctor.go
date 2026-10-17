@@ -85,8 +85,14 @@ type doctorReport struct {
 }
 
 // runDoctor diagnoses the op-forward chain and reports which layer, if any,
-// is broken. It is read-only: it never refreshes or writes tokens and never
-// runs an authenticated op command unless --interactive is given.
+// is broken. It never runs an authenticated op command unless --interactive
+// is given. It changes no user data, but by default it does one thing a pure
+// read would not: when the access token is missing or expired and a valid
+// refresh token exists, it performs the same /token/refresh exchange the proxy
+// performs and saves the rotated tokens where the proxy saves them, so that
+// the daemon_op check can run instead of being skipped (access tokens last one
+// hour, so this is the common case on an idle machine). --no-refresh restores
+// a strictly read-only run. Any renewal is stated in the report.
 //
 // The layers, from the shim outward: the binary and shim, the endpoint, the
 // daemon, the token chain, and finally the host's own 1Password integration.
@@ -107,6 +113,7 @@ func runDoctor() error {
 	role := fs.String("role", roleAuto, "Role to diagnose: auto, client, or host. auto treats a machine with an op-forward shim as a client, otherwise a machine with the real op as the host")
 	asJSON := fs.Bool("json", false, "Print the report as JSON")
 	interactive := fs.Bool("interactive", false, "Also run an authenticated 1Password read to verify the session. This MAY RAISE A BIOMETRIC PROMPT on the host")
+	noRefresh := fs.Bool("no-refresh", false, "Do not renew an expired access token. By default doctor refreshes it from the refresh token (the same /token/refresh exchange the proxy makes, which rotates and rewrites the token files); this flag makes the run strictly read-only")
 	if err := parseFlags(fs, os.Args[2:]); err != nil {
 		return err
 	}
@@ -134,7 +141,7 @@ func runDoctor() error {
 		ep, epErr = endpoint.ForDial(endpointArg(*addr, explicit, "host", "port"), *host, *port)
 	}
 
-	d := &doctor{role: resolvedRole, interactive: *interactive, shimPath: shimPath}
+	d := &doctor{role: resolvedRole, interactive: *interactive, noRefresh: *noRefresh, shimPath: shimPath}
 	report := d.run(ep, epErr)
 
 	if *asJSON {
@@ -174,11 +181,32 @@ func resolveRole(requested, shimPath string) string {
 type doctor struct {
 	role        string
 	interactive bool
-	shimPath    string
+	// noRefresh forbids renewing the access token, keeping the run read-only.
+	noRefresh bool
+	shimPath  string
+	// renewal records what this run did about the access token, so the
+	// daemon_op and tokens checks describe the same fact in the same words.
+	renewal renewalState
+	// renewalFailure is the finding when renewal is renewalFailed.
+	renewalFailure opComponent
 	// probeTimeout bounds the local authenticated probe in the host role; zero
 	// selects opcheck.DefaultProbeTimeout. Tests shorten it.
 	probeTimeout time.Duration
 }
+
+// renewalState is what a doctor run did about an unusable access token.
+type renewalState int
+
+const (
+	// renewalIdle: doctor did not touch the tokens.
+	renewalIdle renewalState = iota
+	// renewalDone: doctor renewed the access token and saved the rotated pair.
+	renewalDone
+	// renewalFailed: renewal was attempted and did not complete.
+	renewalFailed
+	// renewalDeclined: renewal was needed but --no-refresh forbade it.
+	renewalDeclined
+)
 
 // announceProbe tells the operator, on stderr, that an authenticated probe is
 // starting and may wait for an action on the host. A probe against a locked
@@ -357,23 +385,98 @@ func (d *doctor) checkDaemonHealth(ep endpoint.Endpoint) doctorCheck {
 	return doctorCheck{ID: "daemon_health", Status: statusOK, Summary: "daemon answers /health", Data: map[string]any{"status": health.Status}}
 }
 
+// tokenFixAction is the deployment action for a client that has no usable
+// credentials, worded for the role being diagnosed.
+func (d *doctor) tokenFixAction() string {
+	if d.role == roleHost {
+		return "start the daemon (op-forward serve); it generates the token files"
+	}
+	return "copy refresh.token from the host (~/Library/Caches/op-forward/refresh.token) to this machine's op-forward token directory, or re-run your deployment script"
+}
+
+// renewAccessToken exchanges the refresh token for a new pair through the
+// proxy's own attemptRefresh and persists the pair through the proxy's own
+// writeTokenFile, access token first and then the rotated refresh token. On
+// success it returns the new access token (held in memory for the request, not
+// re-read from disk). On failure it records the finding in d.renewalFailure
+// and returns false. Token values never reach an error message or the report.
+func (d *doctor) renewAccessToken(ep endpoint.Endpoint, refreshToken string) (string, bool) {
+	fail := func(summary, action string) (string, bool) {
+		d.renewal = renewalFailed
+		d.renewalFailure = opComponent{statusFail, summary, action}
+		return "", false
+	}
+
+	tokens, err := attemptRefresh(ep.HTTPClient(doctorHealthTimeout), ep, refreshToken)
+	if err != nil {
+		return fail("could not renew the access token from the refresh token: "+err.Error(), d.tokenFixAction())
+	}
+	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
+		return fail("could not renew the access token: the daemon's refresh answer was incomplete", d.tokenFixAction())
+	}
+
+	// The daemon has rotated the refresh token by now, so a failure to save
+	// it leaves this machine holding a token the daemon no longer accepts.
+	accessPath, refreshPath := proxyTokenPath(auth.AccessTokenFile), proxyTokenPath(auth.RefreshTokenFile)
+	saveErr := writeTokenFile(accessPath, tokens.AccessToken, tokens.AccessExpires)
+	if saveErr == nil {
+		saveErr = writeTokenFile(refreshPath, tokens.RefreshToken, tokens.RefreshExpires)
+	}
+	if saveErr != nil {
+		return fail("the access token was renewed but the rotated tokens could not be saved: "+saveErr.Error()+
+			" (the daemon now expects a refresh token this machine does not have)",
+			"make the token directory writable, then "+d.tokenFixAction())
+	}
+	d.renewal = renewalDone
+	return tokens.AccessToken, true
+}
+
+// renewalFinding renders the recorded renewal failure as a check.
+func (d *doctor) renewalFinding(id string) doctorCheck {
+	f := d.renewalFailure
+	return doctorCheck{ID: id, Status: f.status, Summary: f.summary, Action: f.action}
+}
+
 // checkDaemonOp asks the daemon what it sees of the host's op integration.
 // Its answer comes from the daemon's own environment, which differs from an
 // interactive shell (a launchd service has its own PATH), so it can disagree
-// with the local check in useful ways.
+// with the local check in useful ways. When doctor renewed the access token
+// to be able to ask, the summary says so, because that changed local state.
 func (d *doctor) checkDaemonOp(ep endpoint.Endpoint, reachable bool) doctorCheck {
-	const id = "daemon_op"
 	if !reachable {
-		return skipped(id, "not checked: the daemon is not reachable")
+		return skipped("daemon_op", "not checked: the daemon is not reachable")
 	}
+	check := d.queryDaemonOp(ep)
+	if d.renewal == renewalDone {
+		check.Summary = "renewed the access token from the refresh token (doctor called /token/refresh; the rotated tokens were saved to " +
+			filepath.Dir(proxyTokenPath(auth.AccessTokenFile)) + "); " + check.Summary
+		if check.Data == nil {
+			check.Data = map[string]any{}
+		}
+		check.Data["token_refreshed"] = true
+	}
+	return check
+}
+
+func (d *doctor) queryDaemonOp(ep endpoint.Endpoint) doctorCheck {
+	const id = "daemon_op"
 
 	token, ok := readAccessTokenValue()
 	if !ok {
-		return doctorCheck{
-			ID:      id,
-			Status:  statusWarn,
-			Summary: "not checked: no valid access token to authenticate /health/op",
-			Action:  "run any op command (for example op --version) so the proxy refreshes the access token, then re-run doctor",
+		refreshToken, haveRefresh := readValidTokenValue(auth.RefreshTokenFile)
+		switch {
+		case !haveRefresh:
+			return doctorCheck{ID: id, Status: statusFail,
+				Summary: "not checked: no valid access token and no valid refresh token to renew it from",
+				Action:  d.tokenFixAction()}
+		case d.noRefresh:
+			d.renewal = renewalDeclined
+			c := skipped(id, "not checked: the access token is missing or expired and --no-refresh forbids renewing it")
+			c.Action = "re-run doctor without --no-refresh to let it renew the token (this rewrites the token files, as the proxy does)"
+			return c
+		}
+		if token, ok = d.renewAccessToken(ep, refreshToken); !ok {
+			return d.renewalFinding(id)
 		}
 	}
 
@@ -386,13 +489,28 @@ func (d *doctor) checkDaemonOp(ep endpoint.Endpoint, reachable bool) doctorCheck
 		d.announceProbe()
 	}
 	status, body, err := doctorGet(ep, path, token, timeout)
+
+	// A token that looks valid locally but is rejected means the daemon was
+	// restarted and forgot it. Renew once and retry, as the proxy does.
+	if status == http.StatusUnauthorized && d.renewal == renewalIdle && !d.noRefresh {
+		if refreshToken, haveRefresh := readValidTokenValue(auth.RefreshTokenFile); haveRefresh {
+			if token, ok = d.renewAccessToken(ep, refreshToken); !ok {
+				return d.renewalFinding(id)
+			}
+			status, body, err = doctorGet(ep, path, token, timeout)
+		}
+	}
+
 	switch {
 	case err != nil:
 		return doctorCheck{ID: id, Status: statusFail, Summary: "GET /health/op failed: " + err.Error(),
 			Action: "check the daemon log; if the request timed out, an authorization prompt on the host may be waiting for approval"}
+	case status == http.StatusUnauthorized && d.renewal == renewalDone:
+		return doctorCheck{ID: id, Status: statusWarn, Summary: "daemon rejected the access token it had just issued",
+			Action: "check that the endpoint reaches a single daemon instance (two daemons or a load balancer would explain this), then re-run doctor"}
 	case status == http.StatusUnauthorized:
 		return doctorCheck{ID: id, Status: statusWarn, Summary: "daemon rejected the access token",
-			Action: "the daemon was probably restarted; run any op command so the proxy refreshes the token, or redeploy refresh.token from the host"}
+			Action: "the daemon was probably restarted; re-run doctor without --no-refresh so it refreshes the token, or redeploy refresh.token from the host"}
 	case status == http.StatusNotFound:
 		return doctorCheck{ID: id, Status: statusWarn, Summary: "daemon predates /health/op, so its op integration cannot be inspected remotely",
 			Action: "update the daemon host to this op-forward version (op-forward update) and restart the daemon"}
@@ -448,6 +566,16 @@ func readAccessTokenValue() (string, bool) {
 	return "", false
 }
 
+// readValidTokenValue returns the value of the named token file when it is
+// present and unexpired. The value is only ever placed in a request header.
+func readValidTokenValue(name string) (string, bool) {
+	t, err := auth.LoadFromPath(proxyTokenPath(name))
+	if err != nil || !t.IsValid() {
+		return "", false
+	}
+	return t.Value, true
+}
+
 func (d *doctor) checkTokens() doctorCheck {
 	access := inspectToken(proxyTokenPath(auth.AccessTokenFile))
 	refresh := inspectToken(proxyTokenPath(auth.RefreshTokenFile))
@@ -457,16 +585,25 @@ func (d *doctor) checkTokens() doctorCheck {
 		Data: map[string]any{"access": access, "refresh": refresh, "legacy": legacy},
 	}
 
-	fix := "copy refresh.token from the host (~/Library/Caches/op-forward/refresh.token) to this machine's op-forward token directory, or re-run your deployment script"
-	if d.role == roleHost {
-		fix = "start the daemon (op-forward serve); it generates the token files"
-	}
+	fix := d.tokenFixAction()
 
 	switch {
+	case d.renewal == renewalFailed:
+		// Same status, wording and action as the daemon_op check, which
+		// reports the identical fact.
+		f := d.renewalFailure
+		check.Status, check.Summary, check.Action = f.status, f.summary, f.action
+	case d.renewal == renewalDone:
+		check.Status = statusOK
+		check.Summary = "access token was missing or expired; doctor renewed it from the refresh token just now and saved the rotated tokens"
+		check.Data["token_refreshed"] = true
+	case d.renewal == renewalDeclined:
+		check.Status = statusOK
+		check.Summary = "access token is missing or expired; --no-refresh was given so doctor did not renew it (the proxy renews it from the refresh token on next use)"
 	case access.Valid && refresh.Valid:
 		check.Status, check.Summary = statusOK, "access and refresh tokens are valid"
 	case refresh.Valid:
-		check.Status, check.Summary = statusOK, "access token is missing or expired; the proxy renews it from the refresh token on next use"
+		check.Status, check.Summary = statusOK, "access token is missing or expired and was not renewed by this run; the proxy renews it from the refresh token on next use"
 	case access.Valid || legacy.Valid:
 		check.Status = statusWarn
 		check.Summary = "no valid refresh token: the access token cannot be renewed when it expires (access tokens last one hour)"

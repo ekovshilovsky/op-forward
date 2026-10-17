@@ -33,6 +33,9 @@ const (
 	doctorAccessValue  = "ACCESS-TOKEN-VALUE-0123456789abcdef"
 	doctorRefreshValue = "REFRESH-TOKEN-VALUE-fedcba9876543210"
 	doctorLegacyValue  = "LEGACY-TOKEN-VALUE-00112233445566"
+	// The pair a stub daemon issues on /token/refresh.
+	doctorNewAccessValue  = "NEW-ACCESS-TOKEN-VALUE-aabbccddeeff"
+	doctorNewRefreshValue = "NEW-REFRESH-TOKEN-VALUE-112233445566"
 )
 
 // ---------- Fixtures ----------
@@ -149,10 +152,14 @@ type doctorStub struct {
 	srv    *httptest.Server
 	health http.HandlerFunc
 	op     http.HandlerFunc
+	// refresh answers /token/refresh. The default issues a fresh token pair.
+	refresh http.HandlerFunc
 
-	mu      sync.Mutex
-	queries []string
-	auths   []string
+	mu            sync.Mutex
+	queries       []string
+	auths         []string
+	refreshAuths  []string
+	refreshMethod []string
 }
 
 func newDoctorStub(t *testing.T) *doctorStub {
@@ -167,7 +174,22 @@ func newDoctorStub(t *testing.T) *doctorStub {
 			})
 		},
 	}
+	s.refresh = func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(daemon.TokenRefreshResponse{
+			AccessToken:    doctorNewAccessValue,
+			AccessExpires:  time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			RefreshToken:   doctorNewRefreshValue,
+			RefreshExpires: time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339),
+		})
+	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/token/refresh", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.refreshAuths = append(s.refreshAuths, r.Header.Get("Authorization"))
+		s.refreshMethod = append(s.refreshMethod, r.Method)
+		s.mu.Unlock()
+		s.refresh(w, r)
+	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { s.health(w, r) })
 	mux.HandleFunc("/health/op", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -182,6 +204,13 @@ func newDoctorStub(t *testing.T) *doctorStub {
 }
 
 func (s *doctorStub) endpoint() string { return "tcp://" + s.srv.Listener.Addr().String() }
+
+// refreshCalls returns the bearer values /token/refresh was called with.
+func (s *doctorStub) refreshCalls() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.refreshAuths...)
+}
 
 func (s *doctorStub) opQueries() []string {
 	s.mu.Lock()
@@ -530,23 +559,431 @@ func TestDoctorClassifiesDaemonOpAnswers(t *testing.T) {
 	}
 }
 
-func TestDoctorWithoutAValidAccessTokenCannotAskTheDaemonButSaysSo(t *testing.T) {
+// readStoredToken returns the value and expiry line of a token file in the
+// fixture directory so tests can check what doctor persisted.
+func (fx doctorFixture) readStoredToken(t *testing.T, name string) (value, expires string, mode os.FileMode) {
+	t.Helper()
+	path := filepath.Join(fx.tokenDir, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", name, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", name, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("%s has %d lines, want value and expiry", name, len(lines))
+	}
+	return lines[0], lines[1], info.Mode().Perm()
+}
+
+// ---------- Token renewal ----------
+
+// THE COMMON CASE: the access token has expired (they last an hour) while a
+// valid refresh token is present. Doctor must renew it itself, then ask the
+// daemon, rather than skipping the check and sending the human elsewhere.
+func TestDoctorRenewsAnExpiredAccessTokenAndThenAsksTheDaemon(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		name := "expired"
+		if missing {
+			name = "missing"
+		}
+		t.Run(name, func(t *testing.T) {
+			fx := newDoctorFixture(t)
+			fx.installShim(t)
+			if missing {
+				fx.removeToken(t, auth.AccessTokenFile)
+			} else {
+				fx.writeToken(t, auth.AccessTokenFile, doctorAccessValue, time.Now().Add(-time.Minute))
+			}
+			stub := newDoctorStub(t)
+
+			stdout, stderr, err := runDoctorCmd(t, "--json", "--addr", stub.endpoint())
+			assertExit(t, err, 0)
+			var rep doctorReport
+			if jsonErr := json.Unmarshal([]byte(stdout), &rep); jsonErr != nil {
+				t.Fatalf("report does not parse: %v", jsonErr)
+			}
+
+			if calls := stub.refreshCalls(); len(calls) != 1 || calls[0] != "Bearer "+doctorRefreshValue {
+				t.Errorf("/token/refresh authorizations = %q, want one call with the refresh token", calls)
+			}
+			stub.mu.Lock()
+			if len(stub.refreshMethod) != 1 || stub.refreshMethod[0] != http.MethodPost {
+				t.Errorf("/token/refresh methods = %q, want POST", stub.refreshMethod)
+			}
+			if len(stub.auths) != 1 || stub.auths[0] != "Bearer "+doctorNewAccessValue {
+				t.Errorf("/health/op authorization = %q, want the renewed access token", stub.auths)
+			}
+			stub.mu.Unlock()
+
+			daemonOp := rep.check(t, "daemon_op")
+			if daemonOp.Status != statusOK {
+				t.Errorf("daemon_op = %q %q, want ok", daemonOp.Status, daemonOp.Summary)
+			}
+			if !strings.Contains(daemonOp.Summary, "renewed the access token") || !strings.Contains(daemonOp.Summary, "/token/refresh") {
+				t.Errorf("daemon_op must say doctor changed token state: %q", daemonOp.Summary)
+			}
+			if daemonOp.Data["token_refreshed"] != true {
+				t.Errorf("daemon_op data = %v, want token_refreshed=true", daemonOp.Data)
+			}
+			tokens := rep.check(t, "tokens")
+			if tokens.Status != statusOK || !strings.Contains(tokens.Summary, "doctor renewed") {
+				t.Errorf("tokens = %q %q, want ok saying doctor renewed the token", tokens.Status, tokens.Summary)
+			}
+			if strings.Contains(tokens.Summary, "on next use") {
+				t.Errorf("tokens claims the proxy renews it later although doctor just did: %q", tokens.Summary)
+			}
+			for _, secret := range []string{doctorNewAccessValue, doctorNewRefreshValue, doctorRefreshValue} {
+				if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+					t.Errorf("doctor output leaks a token value %q", secret)
+				}
+			}
+
+			// Both rotated tokens are persisted where the proxy persists
+			// them, with the proxy's permissions.
+			for name, want := range map[string]string{auth.AccessTokenFile: doctorNewAccessValue, auth.RefreshTokenFile: doctorNewRefreshValue} {
+				value, expires, mode := fx.readStoredToken(t, name)
+				if value != want {
+					t.Errorf("%s was not rotated on disk", name)
+				}
+				if _, parseErr := time.Parse(time.RFC3339, expires); parseErr != nil {
+					t.Errorf("%s expiry %q is not RFC3339", name, expires)
+				}
+				if mode != 0o600 {
+					t.Errorf("%s mode = %o, want 0600", name, mode)
+				}
+			}
+		})
+	}
+}
+
+// A daemon that was restarted rejects an access token that still looks valid
+// locally. Doctor renews once and retries, the same recovery the proxy makes.
+func TestDoctorRenewsOnceWhenTheDaemonRejectsAStillValidLookingToken(t *testing.T) {
 	fx := newDoctorFixture(t)
 	fx.installShim(t)
-	fx.removeToken(t, auth.AccessTokenFile)
 	stub := newDoctorStub(t)
+	stub.op = func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+doctorNewAccessValue {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writeOpReport(w, opcheck.Report{OpPresent: true, OpVersion: "2.41.0", Integration: opcheck.IntegrationReachable, AccountCount: intPtr(1), Session: opcheck.SessionNotProbed})
+	}
 
 	rep, err := runDoctorJSON(t, "--addr", stub.endpoint())
 
 	assertExit(t, err, 0)
 	c := rep.check(t, "daemon_op")
-	if c.Status != statusWarn || !strings.Contains(c.Summary, "no valid access token") {
-		t.Errorf("daemon_op = %q %q, want a warn about the missing access token", c.Status, c.Summary)
+	if c.Status != statusOK || !strings.Contains(c.Summary, "renewed the access token") {
+		t.Errorf("daemon_op = %q %q, want ok after a renewal", c.Status, c.Summary)
+	}
+	if n := len(stub.opQueries()); n != 2 {
+		t.Errorf("/health/op was asked %d times, want the rejected try and one retry", n)
+	}
+	if n := len(stub.refreshCalls()); n != 1 {
+		t.Errorf("/token/refresh called %d times, want 1", n)
+	}
+}
+
+// A token the daemon rejects again right after being issued one is reported,
+// not retried in a loop.
+func TestDoctorStopsAfterOneRenewalWhenTheDaemonStillRejects(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	stub := newDoctorStub(t)
+	stub.op = func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }
+
+	rep, _ := runDoctorJSON(t, "--addr", stub.endpoint())
+
+	c := rep.check(t, "daemon_op")
+	if c.Status != statusWarn || !strings.Contains(c.Summary, "rejected the access token") || !strings.Contains(c.Summary, "renewed") {
+		t.Errorf("daemon_op = %q %q, want a warn that names the renewal", c.Status, c.Summary)
+	}
+	if !strings.Contains(c.Action, "single daemon") {
+		t.Errorf("action %q should point at the endpoint reaching more than one daemon", c.Action)
+	}
+	if n := len(stub.refreshCalls()); n != 1 {
+		t.Errorf("/token/refresh called %d times, want exactly 1", n)
+	}
+}
+
+// The refresh failing is the finding, with the daemon's reason, and replaces
+// the old advice to run another command.
+func TestDoctorReportsAFailedRefreshWithTheReason(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	fx.writeToken(t, auth.AccessTokenFile, doctorAccessValue, time.Now().Add(-time.Minute))
+	stub := newDoctorStub(t)
+	stub.refresh = func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"refresh_token_expired","message":"refresh token rejected by the daemon"}`))
+	}
+
+	rep, err := runDoctorJSON(t, "--addr", stub.endpoint())
+
+	assertExit(t, err, doctorExitFailed)
+	daemonOp := rep.check(t, "daemon_op")
+	if daemonOp.Status != statusFail || !strings.Contains(daemonOp.Summary, "refresh token rejected by the daemon") {
+		t.Errorf("daemon_op = %q %q, want a failure carrying the daemon's reason", daemonOp.Status, daemonOp.Summary)
+	}
+	if strings.Contains(daemonOp.Action, "run any op command") || !strings.Contains(daemonOp.Action, "refresh.token") {
+		t.Errorf("action %q must be the deployment fix, not the old advice", daemonOp.Action)
+	}
+	tokens := rep.check(t, "tokens")
+	if tokens.Status != daemonOp.Status || tokens.Summary != daemonOp.Summary || tokens.Action != daemonOp.Action {
+		t.Errorf("tokens and daemon_op disagree about one fact:\n tokens:    %q %q %q\n daemon_op: %q %q %q",
+			tokens.Status, tokens.Summary, tokens.Action, daemonOp.Status, daemonOp.Summary, daemonOp.Action)
 	}
 	if n := len(stub.opQueries()); n != 0 {
-		t.Errorf("doctor sent %d unauthenticated /health/op requests", n)
+		t.Errorf("doctor sent %d /health/op requests without a token", n)
+	}
+	// Nothing was rotated, so the files are untouched.
+	if value, _, _ := fx.readStoredToken(t, auth.RefreshTokenFile); value != doctorRefreshValue {
+		t.Error("a failed refresh must not touch the refresh token on disk")
+	}
+}
+
+// The daemon rejects a token that looked valid and then refuses the refresh
+// too: the refresh failure is the finding.
+func TestDoctorReportsAFailedRefreshAfterARejectedToken(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	stub := newDoctorStub(t)
+	stub.op = func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }
+	stub.refresh = func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "no", http.StatusUnauthorized) }
+
+	rep, err := runDoctorJSON(t, "--addr", stub.endpoint())
+
+	assertExit(t, err, doctorExitFailed)
+	c := rep.check(t, "daemon_op")
+	if c.Status != statusFail || !strings.Contains(c.Summary, "could not renew") || !strings.Contains(c.Action, "refresh.token") {
+		t.Errorf("daemon_op = %q %q %q", c.Status, c.Summary, c.Action)
+	}
+}
+
+func TestDoctorRefreshProtocolFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		refresh http.HandlerFunc
+		want    string
+	}{
+		{"opaque http error", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "bad gateway", http.StatusBadGateway) }, "HTTP 502"},
+		{"unparseable body", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>")) }, "parsing refresh response"},
+		{"incomplete token pair", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"access_token":"X"}`)) }, "incomplete"},
+		{"connection dropped", func(w http.ResponseWriter, _ *http.Request) { panic(http.ErrAbortHandler) }, "refresh request failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newDoctorFixture(t)
+			fx.installShim(t)
+			fx.removeToken(t, auth.AccessTokenFile)
+			stub := newDoctorStub(t)
+			stub.refresh = tt.refresh
+
+			rep, err := runDoctorJSON(t, "--addr", stub.endpoint())
+
+			assertExit(t, err, doctorExitFailed)
+			c := rep.check(t, "daemon_op")
+			if c.Status != statusFail || !strings.Contains(c.Summary, tt.want) {
+				t.Errorf("daemon_op = %q %q, want a failure containing %q", c.Status, c.Summary, tt.want)
+			}
+			if value, _, _ := fx.readStoredToken(t, auth.RefreshTokenFile); value != doctorRefreshValue {
+				t.Error("an unusable refresh answer must not overwrite the refresh token")
+			}
+		})
+	}
+}
+
+// The daemon rotates the refresh token on every refresh. If the new pair
+// cannot be saved, this machine now holds a refresh token the daemon no longer
+// accepts, and that must be reported loudly rather than as a plain success.
+func TestDoctorReportsWhenTheRotatedTokensCannotBeSaved(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	fx.removeToken(t, auth.AccessTokenFile)
+	stub := newDoctorStub(t)
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not constrain root")
+	}
+	// A read-only token directory lets the tokens be read but makes writing
+	// the rotated pair fail.
+	if err := os.Chmod(fx.tokenDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(fx.tokenDir, 0o700) })
+
+	rep, err := runDoctorJSON(t, "--addr", stub.endpoint())
+
+	assertExit(t, err, doctorExitFailed)
+	c := rep.check(t, "daemon_op")
+	if c.Status != statusFail || !strings.Contains(c.Summary, "could not be saved") {
+		t.Errorf("daemon_op = %q %q, want a failure about saving the rotated tokens", c.Status, c.Summary)
+	}
+	if !strings.Contains(c.Action, "refresh.token") {
+		t.Errorf("action %q should say to redeploy refresh.token", c.Action)
+	}
+	if strings.Contains(c.Summary+c.Action, doctorNewRefreshValue) {
+		t.Error("the report must never contain the new token value")
+	}
+}
+
+// No valid refresh token at all: doctor cannot renew and says what to deploy.
+func TestDoctorWithoutAnyRenewableTokenGivesTheDeploymentAction(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		setup func(t *testing.T, fx doctorFixture)
+	}{
+		{"refresh file missing", func(t *testing.T, fx doctorFixture) { fx.removeToken(t, auth.RefreshTokenFile) }},
+		{"refresh token expired", func(t *testing.T, fx doctorFixture) {
+			fx.writeToken(t, auth.RefreshTokenFile, doctorRefreshValue, time.Now().Add(-time.Hour))
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newDoctorFixture(t)
+			fx.installShim(t)
+			fx.removeToken(t, auth.AccessTokenFile)
+			tt.setup(t, fx)
+			stub := newDoctorStub(t)
+
+			rep, err := runDoctorJSON(t, "--addr", stub.endpoint())
+
+			assertExit(t, err, doctorExitFailed)
+			daemonOp := rep.check(t, "daemon_op")
+			if daemonOp.Status != statusFail || !strings.Contains(daemonOp.Summary, "no valid refresh token") {
+				t.Errorf("daemon_op = %q %q, want a failure about the missing refresh token", daemonOp.Status, daemonOp.Summary)
+			}
+			if !strings.Contains(daemonOp.Action, "copy refresh.token from the host") {
+				t.Errorf("action %q must be the deployment action", daemonOp.Action)
+			}
+			tokens := rep.check(t, "tokens")
+			if tokens.Status != daemonOp.Status || tokens.Action != daemonOp.Action {
+				t.Errorf("tokens (%q) and daemon_op (%q) disagree", tokens.Status, daemonOp.Status)
+			}
+			if n := len(stub.refreshCalls()) + len(stub.opQueries()); n != 0 {
+				t.Errorf("doctor made %d requests it had no token for", n)
+			}
+		})
+	}
+}
+
+// --no-refresh makes the run strictly read-only: no /token/refresh call and
+// no file written, whatever state the tokens are in.
+func TestDoctorNoRefreshNeverCallsRefreshOrWritesTokens(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	fx.writeToken(t, auth.AccessTokenFile, doctorAccessValue, time.Now().Add(-time.Minute))
+	stub := newDoctorStub(t)
+
+	rep, err := runDoctorJSON(t, "--no-refresh", "--addr", stub.endpoint())
+
+	assertExit(t, err, 0)
+	if n := len(stub.refreshCalls()) + len(stub.opQueries()); n != 0 {
+		t.Errorf("--no-refresh run made %d token-dependent requests", n)
+	}
+	daemonOp := rep.check(t, "daemon_op")
+	if daemonOp.Status != statusSkip || !strings.Contains(daemonOp.Summary, "--no-refresh") {
+		t.Errorf("daemon_op = %q %q, want a skip naming --no-refresh", daemonOp.Status, daemonOp.Summary)
+	}
+	if !strings.Contains(daemonOp.Action, "without --no-refresh") {
+		t.Errorf("action %q should say how to let doctor renew", daemonOp.Action)
+	}
+	tokens := rep.check(t, "tokens")
+	if tokens.Status != statusOK || !strings.Contains(tokens.Summary, "did not renew") {
+		t.Errorf("tokens = %q %q, want ok saying doctor did not renew", tokens.Status, tokens.Summary)
+	}
+	if value, _, _ := fx.readStoredToken(t, auth.RefreshTokenFile); value != doctorRefreshValue {
+		t.Error("--no-refresh rotated the refresh token")
+	}
+}
+
+// --no-refresh does not stop a valid access token being used.
+func TestDoctorNoRefreshStillQueriesWithAValidAccessToken(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	stub := newDoctorStub(t)
+
+	rep, err := runDoctorJSON(t, "--no-refresh", "--addr", stub.endpoint())
+
+	assertExit(t, err, 0)
+	assertStatus(t, rep, "daemon_op", statusOK)
+	if n := len(stub.refreshCalls()); n != 0 {
+		t.Errorf("/token/refresh called %d times", n)
+	}
+	if strings.Contains(rep.check(t, "daemon_op").Summary, "renewed") {
+		t.Error("nothing was renewed, so the summary must not say so")
+	}
+}
+
+// With --no-refresh a daemon rejection stays the plain warning: no renewal.
+func TestDoctorNoRefreshKeepsTheRejectedTokenWarning(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	stub := newDoctorStub(t)
+	stub.op = func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }
+
+	rep, _ := runDoctorJSON(t, "--no-refresh", "--addr", stub.endpoint())
+
+	c := rep.check(t, "daemon_op")
+	if c.Status != statusWarn || !strings.Contains(c.Summary, "rejected the access token") || strings.Contains(c.Summary, "renewed") {
+		t.Errorf("daemon_op = %q %q", c.Status, c.Summary)
+	}
+	if n := len(stub.refreshCalls()); n != 0 {
+		t.Errorf("/token/refresh called %d times despite --no-refresh", n)
+	}
+}
+
+// A rejected token with no refresh token to renew from keeps the warning and
+// does not attempt a refresh.
+func TestDoctorRejectedTokenWithoutARefreshTokenKeepsTheWarning(t *testing.T) {
+	fx := newDoctorFixture(t)
+	fx.installShim(t)
+	fx.removeToken(t, auth.RefreshTokenFile)
+	stub := newDoctorStub(t)
+	stub.op = func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }
+
+	rep, _ := runDoctorJSON(t, "--addr", stub.endpoint())
+
+	c := rep.check(t, "daemon_op")
+	if c.Status != statusWarn || !strings.Contains(c.Summary, "rejected the access token") {
+		t.Errorf("daemon_op = %q %q", c.Status, c.Summary)
+	}
+	if n := len(stub.refreshCalls()); n != 0 {
+		t.Errorf("/token/refresh called %d times without a refresh token", n)
+	}
+}
+
+// End to end against the real daemon: an expired access token is renewed, the
+// daemon rotates the pair on disk, and the renewed token authenticates.
+func TestDoctorRenewsAgainstTheRealDaemon(t *testing.T) {
+	fx := newDoctorFixture(t)
+	installFakeOp(t)
+	ep := startRealDaemon(t)
+	fx.writeToken(t, auth.AccessTokenFile, "STALE-ACCESS-VALUE", time.Now().Add(-time.Minute))
+
+	rep, err := runDoctorJSON(t, "--listen", ep)
+
+	assertExit(t, err, 0)
+	c := rep.check(t, "daemon_op")
+	if c.Status == statusFail || !strings.Contains(c.Summary, "renewed the access token") {
+		t.Errorf("daemon_op = %q %q", c.Status, c.Summary)
+	}
+	if value, _, _ := fx.readStoredToken(t, auth.RefreshTokenFile); value == doctorRefreshValue {
+		t.Error("the refresh token was not rotated")
 	}
 	assertStatus(t, rep, "tokens", statusOK)
+}
+
+// A run that renewed nothing and is not told not to still documents the flag.
+func TestDoctorHelpDocumentsNoRefresh(t *testing.T) {
+	newDoctorFixture(t)
+	_, stderr, _ := runDoctorCmd(t, "--help")
+	if !strings.Contains(stderr, "-no-refresh") || !strings.Contains(stderr, "refreshes") {
+		t.Errorf("--help must document --no-refresh and that the default refreshes:\n%s", stderr)
+	}
 }
 
 func TestDoctorFallsBackToTheLegacyTokenForTheDaemonQuery(t *testing.T) {
@@ -691,8 +1128,8 @@ func TestDoctorTokenChainStates(t *testing.T) {
 		wantText   string
 	}{
 		{"all valid", roleClient, &future, &future, nil, false, statusOK, "access and refresh tokens are valid"},
-		{"access expired, refresh valid", roleClient, &past, &future, nil, false, statusOK, "renews it"},
-		{"access missing, refresh valid", roleClient, nil, &future, nil, false, statusOK, "renews it"},
+		{"access expired, refresh valid", roleClient, &past, &future, nil, false, statusOK, "not renewed by this run"},
+		{"access missing, refresh valid", roleClient, nil, &future, nil, false, statusOK, "proxy renews it"},
 		{"access valid, no refresh", roleClient, &future, nil, nil, false, statusWarn, "no valid refresh token"},
 		{"access valid, refresh expired", roleClient, &future, &past, nil, false, statusWarn, "no valid refresh token"},
 		{"legacy only", roleClient, nil, nil, &future, false, statusWarn, "no valid refresh token"},

@@ -14,7 +14,7 @@ op-forward proxy [--addr EP] [--host H] [--port N] [--timeout MS] [--] [op argum
 op-forward service install
 op-forward service uninstall
 op-forward update
-op-forward doctor [--json] [--interactive] [--role auto|client|host] [--addr EP] [--listen EP] [--host H] [--port N]
+op-forward doctor [--json] [--interactive] [--no-refresh] [--role auto|client|host] [--addr EP] [--listen EP] [--host H] [--port N]
 op-forward version
 op-forward help | --help | -h
 ```
@@ -223,18 +223,21 @@ Points to know:
 ## doctor
 
 ```
-op-forward doctor [--json] [--interactive] [--role auto|client|host]
+op-forward doctor [--json] [--interactive] [--no-refresh] [--role auto|client|host]
                   [--addr EP] [--listen EP] [--host H] [--port N]
 ```
 
 Diagnoses the op-forward chain layer by layer and prints which layer, if any, is
-broken. It is read-only: it never refreshes or writes tokens, and it never runs
-an authenticated 1Password command unless `--interactive` is given.
+broken. It never runs an authenticated 1Password command unless `--interactive`
+is given. **By default it refreshes an expired access token**: see
+[Token renewal](#token-renewal) below; `--no-refresh` makes the run strictly
+read-only.
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--json` | off | Print the report as JSON (see below) |
 | `--interactive` | off | Also run an authenticated read to verify the 1Password session. **This may raise a biometric prompt on the host**, so it is never the default |
+| `--no-refresh` | off (doctor refreshes) | Do not renew an expired access token; never call `/token/refresh` and never write a token file. `daemon_op` is then skipped when the access token is unusable |
 | `--role` | `auto` | `auto` treats a machine with an op-forward shim at `~/.local/bin/op` as a client, otherwise a machine with a real `op` on `PATH` as the host, otherwise a client. `client` and `host` force the role |
 | `--addr EP`, `--host H`, `--port N` | as for `proxy` | Endpoint to check in the client role |
 | `--listen EP`, `--port N` | as for `serve` | Endpoint to check in the host role. `--addr` is also honored on a host; the `OP_FORWARD_ADDR` variable is not |
@@ -249,8 +252,36 @@ action when not `ok`:
 | `endpoint` | The endpoint resolves and accepts connections. Failure: start the daemon, check the SSH tunnel |
 | `daemon_health` | `GET /health` answers `{"status":"ok"}` |
 | `daemon_op` | What the daemon reports at [`/health/op`](protocol.md#op-health-endpoint) about the host's own `op` integration |
-| `tokens` | Which token files exist, whether they are expired, and whether a refresh token is present. Values are never printed |
+| `tokens` | Which token files exist, whether they are expired, whether a refresh token is present, and whether doctor just renewed the access token. Values are never printed |
 | `op_cli`, `op_integration`, `op_session` | Host role only: the same classification computed locally. Skipped, with a note, in the client role |
+
+### Token renewal
+
+Access tokens last one hour, so on an idle machine, a fresh VM or a fresh
+container the access token is usually missing or expired while a valid refresh
+token is present. `/health/op` needs an access token, and it is the most useful
+remote check, so by default doctor renews the token instead of skipping the
+check: it calls the daemon's `/token/refresh` exactly as `op-forward proxy`
+does (the same code), then saves the new pair in the same files with the same
+permissions (0600 files, 0700 directory). It does this when the access token
+is missing or expired, and once more if the daemon rejects an access token that
+still looked valid (a restarted daemon).
+
+This is ordinary protocol traffic and changes no 1Password or user data, but it
+does change state: the daemon **rotates** the refresh token, so any other
+machine holding a copy of the old token files stops being accepted until it is
+redeployed (see [tokens.md](tokens.md)), exactly as when the proxy refreshes.
+Run with `--no-refresh` to avoid that.
+
+When doctor renewed the token, the `daemon_op` summary starts with `renewed the
+access token from the refresh token`, the `tokens` summary says doctor renewed
+it, and both carry `"token_refreshed": true` in `data`. If the renewal fails,
+that is the finding (status `fail`, with the daemon's reason) in both `daemon_op`
+and `tokens`, with the deployment action `copy refresh.token from the host`.
+With no valid refresh token to renew from, both also fail with that action. If
+the daemon rotated the tokens but they could not be written locally, doctor
+says so, because this machine then holds a refresh token the daemon no longer
+accepts. Token values are never printed.
 
 A failure is reported against the lowest broken layer, and the layers above it
 are skipped instead of failed: an unreachable daemon is an `endpoint` failure

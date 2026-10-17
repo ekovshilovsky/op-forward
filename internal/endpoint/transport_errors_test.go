@@ -102,6 +102,55 @@ func TestListenUnixOverlongPathIncludesPlatformHint(t *testing.T) {
 	}
 }
 
+// The real-world ordering: a world-readable directory such as /tmp together
+// with an over-long path. The directory refusal comes first because it is a
+// security check that must hold before binding, but the error must also carry
+// the path-length hint, so fixing the configuration takes one edit rather than
+// two. The fixture directory is deliberately 0755; the test above this one
+// passes only because its root is private.
+func TestListenUnixOverlongPathInSharedDirectoryReportsBothProblems(t *testing.T) {
+	root := filepath.Dir(shortSocketPath(t))
+	longDir := filepath.Join(root, strings.Repeat("d", 120))
+	if err := os.Mkdir(longDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(longDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(longDir, "s.sock")
+
+	ln, err := Endpoint{Network: "unix", Address: sock}.Listen()
+	if err == nil {
+		_ = ln.Close()
+		t.Fatal("Listen() succeeded in a world-readable directory")
+	}
+	for _, fragment := range []string{"is mode 0755", "must be 0700", "104 bytes on macOS", "shorter path"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Errorf("Listen() error = %q, want it to contain %q", err, fragment)
+		}
+	}
+	if _, statErr := os.Lstat(sock); !os.IsNotExist(statErr) {
+		t.Errorf("nothing may be bound after the refusal, Lstat error = %v", statErr)
+	}
+}
+
+// A short path in a shared directory gets the directory refusal alone: the
+// length hint would be noise.
+func TestListenUnixShortPathInSharedDirectoryOmitsTheLengthHint(t *testing.T) {
+	path := shortSocketPath(t)
+	if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Endpoint{Network: "unix", Address: path}.Listen()
+	if err == nil || !strings.Contains(err.Error(), "must be 0700") {
+		t.Fatalf("Listen() error = %v, want the directory refusal", err)
+	}
+	if strings.Contains(err.Error(), "104") {
+		t.Errorf("Listen() error = %q, must not carry the length hint for a short path", err)
+	}
+}
+
 // ---------- checkPrivateDir ----------
 
 func TestCheckPrivateDirMissingDirectory(t *testing.T) {
