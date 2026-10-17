@@ -304,7 +304,9 @@ Run `op-forward doctor` first: it names the broken layer (shim, endpoint, daemon
 tokens, or the host's own 1Password session) instead of leaving you to guess from
 a failed `op` command. Do not use `op whoami` to judge the host: it reports
 `account is not signed in` both when the account is signed out and when the
-1Password app is merely locked. See [cli.md](cli.md#doctor).
+1Password app is merely locked. By default doctor renews an expired access token
+from the refresh token (which rotates the pair, as the proxy does); pass
+`--no-refresh` for a strictly read-only run. See [cli.md](cli.md#doctor).
 
 ### Locked 1Password app
 
@@ -373,11 +375,15 @@ the note there about rotation. Meanings of each message are in
   yourself.
 - Host: `socket directory ... is mode ...; it must be 0700` or `owned by uid`
   means the parent directory is shared or belongs to another user. Use a private
-  directory such as `~/Library/Caches/op-forward`.
+  directory such as `~/Library/Caches/op-forward`. If the path is also over about
+  100 bytes (typical under `/tmp` or a macOS `/var/folders/...` temp directory),
+  the same message ends with `also, socket paths are limited to about 104 bytes
+  on macOS; choose a shorter path`: fix both together. The directory check runs
+  first by design.
 - VM: `ssh -R` reports `Address already in use` for the socket path (this is
   OpenSSH's error text, not an op-forward message). Set
   `StreamLocalBindUnlink yes` on the VM's sshd, or delete the leftover socket file.
-- A bind failure for a long path includes a hint about the roughly 104-byte limit
+- A bind failure for a long path (in a private directory) includes a hint about the roughly 104-byte limit
   on macOS; shorten the path.
 
 ### Shim falling back to the real op

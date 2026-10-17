@@ -48,6 +48,15 @@ func (e Endpoint) listenUnix() (net.Listener, error) {
 		return nil, fmt.Errorf("creating socket directory: %w", err)
 	}
 	if err := checkPrivateDir(dir); err != nil {
+		// The directory check runs first because it is a security refusal
+		// that must hold before anything is bound, but an over-long path is
+		// just as fatal and is the next error the operator would meet once
+		// the directory is fixed. Both are reported together so one edit to
+		// the configuration fixes both (a shared directory such as /tmp
+		// combined with a long path is the common real-world case).
+		if hint := socketPathLengthHint(e.Address); hint != "" {
+			return nil, fmt.Errorf("%w; also, %s", err, hint)
+		}
 		return nil, err
 	}
 	if info, err := os.Lstat(e.Address); err == nil {
@@ -70,8 +79,8 @@ func (e Endpoint) listenUnix() (net.Listener, error) {
 	ln, err := net.Listen("unix", e.Address)
 	syscall.Umask(old)
 	if err != nil {
-		if len(e.Address) > 100 {
-			return nil, fmt.Errorf("listen on unix socket %s: %w (socket paths are limited to about 104 bytes on macOS; choose a shorter path)", e.Address, err)
+		if hint := socketPathLengthHint(e.Address); hint != "" {
+			return nil, fmt.Errorf("listen on unix socket %s: %w (%s)", e.Address, err, hint)
 		}
 		return nil, fmt.Errorf("listen on unix socket: %w", err)
 	}
@@ -82,6 +91,21 @@ func (e Endpoint) listenUnix() (net.Listener, error) {
 		return nil, fmt.Errorf("restricting socket permissions: %w", err)
 	}
 	return ln, nil
+}
+
+// socketPathHintLength is the path length above which an error carries the
+// sun_path hint. It sits a few bytes under the macOS limit of about 104 so a
+// path that is borderline once the terminating byte is counted is still caught.
+const socketPathHintLength = 100
+
+// socketPathLengthHint returns advice about the operating-system limit on
+// Unix socket path length when path is long enough to be the likely cause of a
+// failure, and the empty string otherwise.
+func socketPathLengthHint(path string) string {
+	if len(path) <= socketPathHintLength {
+		return ""
+	}
+	return "socket paths are limited to about 104 bytes on macOS; choose a shorter path"
 }
 
 // checkPrivateDir verifies that dir belongs to the current user and grants
