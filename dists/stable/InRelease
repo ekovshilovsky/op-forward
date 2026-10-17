@@ -5,24 +5,24 @@ Origin: op-forward
 Label: op-forward
 Suite: stable
 Codename: stable
-Date: Fri, 16 Oct 2026 23:58:38 UTC
+Date: Sat, 17 Oct 2026 00:01:53 UTC
 Architectures: amd64 arm64
 Components: main
 Description: op-forward APT repository — forward 1Password CLI across SSH boundaries
 MD5Sum:
- a271a3e933b32be2e6670872cc7f1946 2980 main/binary-amd64/Packages
- 82cb0999c4c382a02c072a1f5b269c7e 2980 main/binary-arm64/Packages
- e672189f85bdb6d26c9c0d76426d768e 852 main/binary-amd64/Packages.gz
- eca257a19f327f778aa02f52ce6b582c 842 main/binary-arm64/Packages.gz
+ 82f0ba251701eee6212a7118122e275c 3725 main/binary-amd64/Packages
+ 47c68c905b11e177148344f65992337c 3725 main/binary-arm64/Packages
+ 94043676d2b127ef191691a29da51ddf 956 main/binary-amd64/Packages.gz
+ f02b602f1d4da62497892bcebe01b01a 946 main/binary-arm64/Packages.gz
 SHA256:
- e000b43be74b007d036f8b29ec14b2bef5b4521ff6bcf1d467011b5734aee646 2980 main/binary-amd64/Packages
- 622f415ed2d9f17a387c042931357b9a2cfd88a356ecd3e32830c9d5fe866af1 2980 main/binary-arm64/Packages
- 14b94955663e3b6461ff55f3c2cae5326ed6407be95559c678dd1268f63a5f20 852 main/binary-amd64/Packages.gz
- d5766c0307ecb08112d805d79d9374ae3cf41a29117b1037572250795c1c3866 842 main/binary-arm64/Packages.gz
+ 615d00518bda1303ceb3748bff6ed45a0a587a5022ca407e348c5ef7880718f0 3725 main/binary-amd64/Packages
+ bace8861179b1c66d395c17c54c7052b2f6b1e0dea2dd0e821b27a6360a1e040 3725 main/binary-arm64/Packages
+ 786500333bffcc8fc527fa4b285d3d31b716d14d6c1bfa70637375054b99acce 956 main/binary-amd64/Packages.gz
+ b46c5c32d046cc9140a68979755ad22e9029d8292ed683d67076d90a4e20657d 946 main/binary-arm64/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQRtV5DblbUIlVnXb9kQnapClxC3XQUCatK6LwAKCRAQnapClxC3
-Xe9LAP9PkWx775xVhLnMyhxuVOV6jXlW8zK6GcGf6BtZSWyDPAD/RGfq84j9ppcJ
-9cG2yKQhBm+VRo1ZW5u577AtHGwMiwc=
-=qz19
+iHUEARYKAB0WIQRtV5DblbUIlVnXb9kQnapClxC3XQUCatK68QAKCRAQnapClxC3
+XUQMAQDqXrgNwjvBAzMrnUoZVqELkz2oasBUFkrKTD5bdYmdHgD/TIn4DWrntRXf
+krfV1DUxYLWjg1fonjRXV8DUU0hKigI=
+=kfU4
 -----END PGP SIGNATURE-----
