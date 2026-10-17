@@ -82,6 +82,15 @@ versioned directory. Remove the service with `op-forward service uninstall`.
 
 ### Windows host
 
+> **Experimental.** The Windows build has not yet been exercised on a real
+> Windows host. In particular, the guarantee that every forwarded command
+> raises its own approval prompt is **unverified** there: on macOS the daemon
+> runs `op` inside a pseudo-TTY precisely so 1Password treats each invocation
+> as interactive and asks for Touch ID again instead of reusing a cached
+> approval. Windows has no equivalent mechanism here, so a Windows host may
+> reuse an approval for a period. Until that is measured, do not rely on
+> per-command approval on Windows.
+
 The daemon can run on a Windows machine that has the 1Password desktop app and
 the 1Password CLI (`op.exe`) installed. Download
 `op-forward_<version>_windows_<amd64|arm64>.zip` from the release page, extract
