@@ -437,6 +437,7 @@ if [ "$GATE" = true ] && [ -s "$WORK/pkgcov.txt" ]; then
             internal/daemon)    echo 95 ;;
             internal/endpoint)  echo 93 ;;
             internal/executor)  echo 97 ;;
+            internal/opcheck)   echo 100 ;;
             internal/version)   echo 100 ;;
             *)                  echo "" ;;
         esac

@@ -78,6 +78,8 @@ func Execute() error {
 		return runService()
 	case "update":
 		return runUpdate()
+	case "doctor":
+		return runDoctor()
 	case "version":
 		fmt.Printf("op-forward %s\n", Version)
 		return nil
@@ -101,6 +103,8 @@ Usage:
   op-forward service install        Install as a launchd daemon (macOS)
   op-forward service uninstall      Remove the launchd daemon
   op-forward update                 Update to the latest release
+  op-forward doctor [--json] [--interactive]
+                                    Diagnose the shim, tunnel, daemon, tokens and host-side 1Password session
   op-forward version                Print version
 
 The host daemon executes 'op' commands locally, triggering biometric

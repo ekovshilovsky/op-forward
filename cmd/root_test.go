@@ -15,6 +15,7 @@ var usageSubcommands = []string{
 	"op-forward service install",
 	"op-forward service uninstall",
 	"op-forward update",
+	"op-forward doctor",
 	"op-forward version",
 }
 

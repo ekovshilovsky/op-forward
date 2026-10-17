@@ -28,7 +28,7 @@ prompt appears is controlled by 1Password's own settings.
 |---|---|---|---|
 | Shim | Remote machine | script written by `op-forward install` ([cmd/install.go](../cmd/install.go)) | Appears on `PATH` as `op`; delegates to `op-forward proxy`; falls back to the real `op` when the proxy reports an infrastructure failure |
 | Proxy | Remote machine | `op-forward proxy` ([cmd/proxy.go](../cmd/proxy.go)) | Resolves the endpoint, probes the daemon, authenticates, refreshes tokens, relays output and exit status |
-| Daemon | Host | `op-forward serve` ([cmd/serve.go](../cmd/serve.go), [internal/daemon/server.go](../internal/daemon/server.go)) | HTTP server exposing `/health`, `/op/execute`, `/token/refresh`; owns the in-memory token pair |
+| Daemon | Host | `op-forward serve` ([cmd/serve.go](../cmd/serve.go), [internal/daemon/server.go](../internal/daemon/server.go)) | HTTP server exposing `/health`, `/health/op`, `/op/execute`, `/token/refresh`; owns the in-memory token pair |
 | Executor | Host (inside the daemon) | [internal/executor/op.go](../internal/executor/op.go) | Validates a request, runs `op` under a pseudo-terminal, captures output and exit status |
 | Endpoint | Both sides | [internal/endpoint/](../internal/endpoint) | Parses `tcp://` and `unix://` endpoints, applies bind rules, performs the peer-uid lookup, builds HTTP clients |
 | Auth | Both sides | [internal/auth/token.go](../internal/auth/token.go) | Token generation, on-disk format, file locations, legacy migration |

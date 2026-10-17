@@ -14,12 +14,13 @@ op-forward proxy [--addr EP] [--host H] [--port N] [--timeout MS] [--] [op argum
 op-forward service install
 op-forward service uninstall
 op-forward update
+op-forward doctor [--json] [--interactive] [--role auto|client|host] [--addr EP] [--listen EP] [--host H] [--port N]
 op-forward version
 op-forward help | --help | -h
 ```
 
 Subcommands recognized by the dispatcher: `serve`, `install`, `proxy`,
-`service`, `update`, `version`, and `help` (also `--help` and `-h`).
+`service`, `update`, `doctor`, `version`, and `help` (also `--help` and `-h`).
 
 Behavior of the dispatcher:
 
@@ -90,8 +91,11 @@ Steps:
 4. Print the shim path, the real `op` path, and whether `op` on `PATH` now
    resolves to the shim. If it does not, `~/.local/bin` is not first on `PATH`.
 
-The shim is a Bash script (`#!/bin/bash`), so `/bin/bash` must exist on the
-machine. If the recorded `op-forward` path is no longer executable (for example
+The shim is a POSIX `sh` script (`#!/bin/sh`), so it runs on minimal systems
+without Bash. Its header carries a version marker line,
+`# op-forward-shim-version: <version>`, filled in from the installing binary;
+[`doctor`](#doctor) reads it to detect a shim left behind by an older release.
+If the recorded `op-forward` path is no longer executable (for example
 after a package moved the binary) it uses `op-forward` from `PATH`. It then runs
 `op-forward proxy -- "$@"`; if the exit status is anything other than 127 it
 exits with that status. If `op-forward` cannot be found or the proxy exits 127,
@@ -215,6 +219,84 @@ Points to know:
 - Installations from a package manager or Homebrew should be updated with that
   tool. The binary of a package lives in `/usr/bin`, which a normal user cannot
   write.
+
+## doctor
+
+```
+op-forward doctor [--json] [--interactive] [--role auto|client|host]
+                  [--addr EP] [--listen EP] [--host H] [--port N]
+```
+
+Diagnoses the op-forward chain layer by layer and prints which layer, if any, is
+broken. It is read-only: it never refreshes or writes tokens, and it never runs
+an authenticated 1Password command unless `--interactive` is given.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--json` | off | Print the report as JSON (see below) |
+| `--interactive` | off | Also run an authenticated read to verify the 1Password session. **This may raise a biometric prompt on the host**, so it is never the default |
+| `--role` | `auto` | `auto` treats a machine with an op-forward shim at `~/.local/bin/op` as a client, otherwise a machine with a real `op` on `PATH` as the host, otherwise a client. `client` and `host` force the role |
+| `--addr EP`, `--host H`, `--port N` | as for `proxy` | Endpoint to check in the client role |
+| `--listen EP`, `--port N` | as for `serve` | Endpoint to check in the host role. `--addr` is also honored on a host; the `OP_FORWARD_ADDR` variable is not |
+
+Checks, in order. Each reports `ok`, `warn`, `fail`, or `skip` with a one-line
+action when not `ok`:
+
+| Check id | What it verifies |
+|---|---|
+| `binary` | The running version |
+| `shim` | `~/.local/bin/op`: current, stale (version differs from the binary), unstamped (installed before stamping existed), not an op-forward shim, or absent. Stale and unstamped are warnings: re-run `op-forward install` |
+| `endpoint` | The endpoint resolves and accepts connections. Failure: start the daemon, check the SSH tunnel |
+| `daemon_health` | `GET /health` answers `{"status":"ok"}` |
+| `daemon_op` | What the daemon reports at [`/health/op`](protocol.md#op-health-endpoint) about the host's own `op` integration |
+| `tokens` | Which token files exist, whether they are expired, and whether a refresh token is present. Values are never printed |
+| `op_cli`, `op_integration`, `op_session` | Host role only: the same classification computed locally. Skipped, with a note, in the client role |
+
+A failure is reported against the lowest broken layer, and the layers above it
+are skipped instead of failed: an unreachable daemon is an `endpoint` failure
+and never a 1Password failure, and a failed host session is reported as
+host-side without implicating the tunnel.
+
+**The session probe, and why it is not `op whoami`.** When the 1Password
+desktop app is locked, `op whoami` exits 1 immediately with `account is not
+signed in`: the same wording as a genuinely signed-out account. A health check
+built on it cannot tell a locked app from a signed-out one, and it sent a long
+investigation down the wrong path when the app was merely locked. The probe is
+an authenticated read (`op vault list`) whose output is discarded unread.
+`op` has no flag or environment variable that makes the desktop-app
+authorization fail instead of prompting (the prompt comes from the 1Password
+app, not from `op`), so by default doctor stops after the metadata checks
+(`op --version`, `op account list`) and reports `op_session` as `skip` with the
+command to run. `--interactive` runs the probe; in the client role it asks the
+daemon to run it (`/health/op?probe=1`), in the host role it runs it locally and
+queries the daemon for metadata only, so one run raises at most one prompt.
+
+The probe waits up to 20 seconds for an answer: long enough to unlock the app
+or approve a Touch ID prompt, short enough not to hang a health check. Because
+a locked app gives no answer at all, a locked app always spends the full wait,
+so `--interactive` prints a notice on stderr before it starts (stdout stays
+valid JSON with `--json`) and the daemon logs the same notice on the host.
+
+**Locked app.** A probe that gets no output before its timeout, on a host where
+`op account list` answered, is reported as `app_locked`: the 1Password app on
+the host is locked or an approval is pending there. Unlock it, or approve the
+prompt, on the host and retry. If `op account list` also failed, the report is
+`timeout` instead and the fault is the integration, not the lock state. See
+[Troubleshooting](deployment.md#locked-1password-app).
+
+Exit status:
+
+| Status | Meaning |
+|---|---|
+| 0 | No check failed (warnings and skipped checks do not change the status) |
+| 1 | At least one check failed |
+| 2 | Usage error: an unknown flag or an invalid `--role` |
+
+`--json` prints one object with the keys `version`, `role`, `endpoint`,
+`interactive`, `status` (`ok`, `warn`, or `fail`), `exit_code`, and `checks`. Each
+check has `id`, `status`, `summary`, optionally `action`, and optionally `data`
+(booleans, counts, versions, and classification strings only). The check ids
+above are stable and always present, in that order.
 
 ## version
 

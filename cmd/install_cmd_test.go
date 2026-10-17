@@ -187,13 +187,24 @@ func TestRunInstallAcceptsLegacyPortFlag(t *testing.T) {
 	fx := newInstallFixture(t)
 	t.Setenv("PATH", fx.realDir)
 
-	setArgs(t, "op-forward", "install", "--port", "9876")
+	// The flag is accepted for backward compatibility and must not change a
+	// single byte of the generated shim, so the two installs are compared
+	// whole. Searching the shim for the port digits instead would match the
+	// random component of the fixture's temporary paths, which the shim
+	// embeds as the recorded binary locations.
+	setArgs(t, "op-forward", "install")
 	_ = captureStdio(t)
+	if err := runInstall(); err != nil {
+		t.Fatalf("runInstall() error: %v", err)
+	}
+	withoutFlag := readFileString(t, fx.shim)
+
+	setArgs(t, "op-forward", "install", "--port", "9876")
 	if err := runInstall(); err != nil {
 		t.Fatalf("runInstall(--port) error: %v", err)
 	}
-	if strings.Contains(readFileString(t, fx.shim), "9876") {
-		t.Errorf("the legacy port value leaked into the shim")
+	if withFlag := readFileString(t, fx.shim); withFlag != withoutFlag {
+		t.Errorf("the legacy port flag changed the generated shim")
 	}
 }
 

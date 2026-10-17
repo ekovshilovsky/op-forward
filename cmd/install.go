@@ -19,9 +19,17 @@ import (
 // environments such as stock Alpine ship only /bin/sh, so a bash shebang
 // would make the installed shim unrunnable exactly where op-forward is
 // most useful. Every construct below is POSIX.
+//
+// The header's second line must keep containing opcheck.ShimSignature, which
+// is how op-forward recognizes its own shim, and the version marker line must
+// keep the shimVersionPrefix wording, which "op-forward doctor" reads to detect
+// a shim installed by an older binary. The exit-code contract below (127 means
+// the forwarding infrastructure failed and the real op is run; every other
+// status is relayed unchanged) is relied on by callers and must not change.
 const shimTemplate = `#!/bin/sh
 # op-forward shim — forwards op commands to host daemon via SSH tunnel.
 # Installed by op-forward. Do not edit directly.
+# op-forward-shim-version: {{VERSION}}
 
 REAL_OP="{{REAL_OP}}"
 OP_FORWARD_BIN="{{OP_FORWARD_BIN}}"
@@ -110,11 +118,48 @@ func runInstall() error {
 	return nil
 }
 
+// shimVersionPrefix introduces the version marker comment in the shim.
+const shimVersionPrefix = "# op-forward-shim-version: "
+
 // renderShim fills the shim template with the op-forward binary path
-// recorded at install time and the real op binary to fall back to.
+// recorded at install time, the real op binary to fall back to, and the
+// version of the installing binary (cmd.Version) as a staleness marker.
 func renderShim(opForwardBin, realOp string) string {
 	shim := strings.ReplaceAll(shimTemplate, "{{OP_FORWARD_BIN}}", opForwardBin)
+	shim = strings.ReplaceAll(shim, "{{VERSION}}", shimVersionStamp(Version))
 	return strings.ReplaceAll(shim, "{{REAL_OP}}", realOp)
+}
+
+// shimVersionStamp reduces a version to characters that are safe inside a
+// shell comment. Released versions (1.2.3, 1.2.3-rc1, 1.2.3+dirty) pass
+// through unchanged; anything else, such as a newline smuggled in through a
+// build flag, is replaced so the stamp can never end the comment line and
+// inject shell code into the shim. Doctor applies the same reduction to the
+// running version before comparing.
+func shimVersionStamp(v string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '.', r == '+', r == '-', r == '_', r == '~':
+			return r
+		}
+		return '_'
+	}, v)
+}
+
+// parseShimVersion extracts the version recorded in a shim's marker line. The
+// boolean is false for a shim that carries no marker, which is every shim
+// installed before stamping existed. Only the leading comment block is
+// consulted, so a marker-shaped line later in the script is ignored.
+func parseShimVersion(content string) (string, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		if rest, ok := strings.CutPrefix(line, shimVersionPrefix); ok {
+			return strings.TrimSpace(rest), true
+		}
+		if line != "" && !strings.HasPrefix(line, "#") {
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // findRealOp locates the real op binary, skipping any existing shim.
