@@ -17,6 +17,7 @@ import (
 	"github.com/ekovshilovsky/op-forward/internal/auth"
 	"github.com/ekovshilovsky/op-forward/internal/endpoint"
 	"github.com/ekovshilovsky/op-forward/internal/executor"
+	"github.com/ekovshilovsky/op-forward/internal/opcheck"
 	"github.com/ekovshilovsky/op-forward/internal/version"
 )
 
@@ -32,6 +33,15 @@ type Server struct {
 	mu           sync.Mutex // Protects token state during concurrent renewal
 	endpoint     endpoint.Endpoint
 	version      string // Server's own version, used for client compatibility checks
+
+	// probeMu admits one authenticated /health/op probe at a time. Each probe
+	// can raise a biometric prompt on the host, so concurrent callers must not
+	// be able to stack prompts.
+	probeMu sync.Mutex
+
+	// probeTimeout bounds the authenticated probe; zero selects
+	// opcheck.DefaultProbeTimeout. Tests shorten it.
+	probeTimeout time.Duration
 }
 
 // New creates a new daemon server with separate access and refresh tokens,
@@ -90,6 +100,7 @@ func withPeerUID(ctx context.Context, uid int) context.Context {
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/health/op", s.handleHealthOp)
 	mux.HandleFunc("/op/execute", s.handleExecute)
 	mux.HandleFunc("/token/refresh", s.handleTokenRefresh)
 	return rejectForeignPeer(mux)
@@ -115,6 +126,66 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		log.Printf("[op-forward] warning: failed to write health response: %v", err)
+	}
+}
+
+// handleHealthOp reports the host's op integration: whether the op CLI is
+// present, its version, how many accounts it lists, and (only on request)
+// whether an authenticated read succeeds. The classification logic lives in
+// the opcheck package so "op-forward doctor" and this endpoint cannot
+// disagree.
+//
+// Authentication: the bearer access token is required, exactly as for
+// /op/execute. The body is limited to booleans, counts, versions, and
+// classification strings, but it still describes the state of the host's
+// 1Password integration, and the endpoint can start a process on the host, so
+// it is not offered to unauthenticated callers. The plain /health route stays
+// open and unchanged for liveness checks.
+//
+// Prompts: by default the endpoint runs metadata commands only, which never
+// raise a biometric prompt, and reports the session as "not_probed". A caller
+// that explicitly passes probe=1 additionally runs an authenticated read,
+// which may raise a prompt on the host; at most one such probe runs at a
+// time and a second concurrent request is refused with 409.
+//
+// A probe against a locked 1Password app gets no answer and runs to its
+// timeout (opcheck.DefaultProbeTimeout), so the request can legitimately take
+// that long. The HTTP response cannot signal progress, so the wait is
+// announced in this daemon's log, which is where the person who can unlock the
+// app on the host is looking; the caller receives app_locked in the report
+// when the wait ends without an answer.
+func (s *Server) handleHealthOp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.authenticateAccess(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	opts := opcheck.Options{}
+	if r.URL.Query().Get("probe") == "1" {
+		if !s.probeMu.TryLock() {
+			http.Error(w, "an authenticated probe is already in progress", http.StatusConflict)
+			return
+		}
+		defer s.probeMu.Unlock()
+		opts.Authenticated = true
+		opts.ProbeTimeout = s.probeTimeout
+		wait := s.probeTimeout
+		if wait <= 0 {
+			wait = opcheck.DefaultProbeTimeout
+		}
+		log.Printf("[op-forward] health probe: waiting up to %s for 1Password on this host; if the app is locked or shows an approval prompt, unlock or approve it now", wait)
+	}
+
+	report := opcheck.Check(r.Context(), opts)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(report); err != nil {
+		log.Printf("[op-forward] warning: failed to write op health response: %v", err)
 	}
 }
 

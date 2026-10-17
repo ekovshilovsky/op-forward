@@ -85,8 +85,8 @@ versioned directory. Remove the service with `op-forward service uninstall`.
 Install `op-forward` on each remote machine by whichever route matches it, then
 run `op-forward install` as each user who will run `op`. Packages install
 `/usr/bin/op-forward`; the install script installs to `~/.local/bin`. Packages
-declare no dependencies, and the shim needs `/bin/bash`; minimal images that do
-not include Bash (the Alpine base image is an example) need it installed.
+declare no dependencies, and the shim is POSIX `sh`, so it runs on minimal images
+such as stock Alpine that do not include Bash.
 
 Repository URLs below use the project's Pages site, `https://ekovshilovsky.github.io/op-forward`.
 
@@ -297,6 +297,33 @@ directly to see its message and status:
 ```bash
 op-forward proxy -- account list; echo "exit=$?"
 ```
+
+### Start with `op-forward doctor`
+
+Run `op-forward doctor` first: it names the broken layer (shim, endpoint, daemon,
+tokens, or the host's own 1Password session) instead of leaving you to guess from
+a failed `op` command. Do not use `op whoami` to judge the host: it reports
+`account is not signed in` both when the account is signed out and when the
+1Password app is merely locked. See [cli.md](cli.md#doctor).
+
+### Locked 1Password app
+
+Check the app's lock state first. A locked 1Password desktop app is the most
+common cause of "op does not work" with a healthy tunnel, and `op` hides it.
+Measured on a host with the app locked:
+
+| Command on the host | Result |
+|---|---|
+| `op account list` | Succeeds in well under a second and lists the accounts: metadata works while locked |
+| `op vault list` (any account) | Hangs with no output, and only exits 1 after about a minute |
+| `op whoami` | Exits 1 immediately with `account is not signed in`: misleading, it is the same wording as a signed-out account |
+
+Symptom through op-forward: `op` commands on the VM hang until the timeout
+(exit 124), or `op-forward doctor --interactive` reports `app_locked`. Fix:
+unlock the 1Password app on the host (a Touch ID approval is enough). Every
+command works again immediately; nothing in op-forward needs restarting.
+`op-forward doctor` without `--interactive` cannot see this state, because it
+reads metadata only; run `op-forward doctor --interactive` to verify.
 
 ### Daemon not reachable
 

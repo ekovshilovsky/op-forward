@@ -13,6 +13,7 @@ types in [internal/executor/op.go](../internal/executor/op.go), and the client i
 | Path | Methods | Authentication | Purpose |
 |---|---|---|---|
 | `/health` | any | none | Liveness check |
+| `/health/op` | `GET` | access token | Report the host's `op` integration (see [below](#op-health-endpoint)) |
 | `/op/execute` | `POST` | access token | Run an `op` command |
 | `/token/refresh` | `POST` | refresh token | Exchange the refresh token for a new pair |
 
@@ -59,6 +60,53 @@ simplest manual probe:
 curl -s http://127.0.0.1:18340/health
 curl -s --unix-socket "$HOME/Library/Caches/op-forward/op-forward.sock" http://unix/health
 ```
+
+## Op health endpoint
+
+```
+GET /health/op[?probe=1]
+```
+
+Describes the host's 1Password CLI integration for `op-forward doctor`. It
+requires the access token, like `/op/execute`: the body is limited to booleans,
+counts, versions, and classification strings, but it describes host state and
+starts `op` processes, so it is not offered to unauthenticated callers. The plain
+`/health` route stays open and unchanged.
+
+Response, `200 OK` (`401` without a valid access token, `405` for other methods):
+
+```json
+{
+  "op_present": true,
+  "op_version": "2.41.0",
+  "integration": "reachable",
+  "account_count": 1,
+  "session": "not_probed",
+  "session_reason": ""
+}
+```
+
+| Field | Values |
+|---|---|
+| `op_present` | A real `op` (not an op-forward shim) was found on the daemon's `PATH` |
+| `op_version` | Output of `op --version`; empty if it could not be run |
+| `integration` | `reachable` (`op account list` answered), `unreachable`, or `unavailable` (no `op`) |
+| `account_count` | Number of accounts listed, or `null` if unknown. No account identifiers are ever returned |
+| `session` | `not_probed` (metadata only), `healthy` (an authenticated read succeeded), or `failed` |
+| `session_reason` | For `failed`: `app_locked` (`op account list` answered but the authenticated read produced no output before the timeout: the app is locked or an approval is pending on the host), `timeout` (the integration itself did not answer), `not_signed_in`, `authorization_denied`, or `op_error`; otherwise empty |
+
+By default only metadata commands run, which do not raise a biometric prompt, and
+`session` is `not_probed`: that value must never be read as healthy. With
+`probe=1` the daemon also runs an authenticated read (`op vault list`, output
+discarded), which **may raise a prompt on the host**. One probe runs at a time; a
+concurrent `probe=1` request receives `409`. The probe is never `op whoami`,
+which reports `account is not signed in` both for a signed-out account and for a
+locked app.
+
+A `probe=1` request can take up to 20 seconds: a locked app never answers, so the
+probe runs to its timeout before `app_locked` is returned. The HTTP reply cannot
+show progress, so the daemon logs `health probe: waiting up to 20s for 1Password
+on this host` when the wait begins. Callers should allow at least 40 seconds.
 
 ## Execute endpoint
 
