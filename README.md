@@ -25,6 +25,11 @@ The developer experience is transparent: run `op account list` or `op item get <
 
 ## Quick Start
 
+Supported platforms: the daemon host runs on macOS (Touch ID) or Linux; remote
+clients run on Linux, in containers, and under WSL. A Windows host build exists
+but is experimental and has not been exercised on real hardware yet — see
+[Windows host](docs/deployment.md#windows-host) before relying on it.
+
 ### Install on macOS (host)
 
 Via Homebrew:
