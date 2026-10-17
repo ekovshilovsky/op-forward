@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ekovshilovsky/op-forward/internal/endpoint"
@@ -61,7 +63,22 @@ echo "op-forward: proxy unavailable and no fallback op binary" >&2
 exit 1
 `
 
+// shimInstallUnsupported explains why the op shim cannot be installed on goos,
+// or returns an empty string when it can. The shim is a POSIX shell script
+// placed in ~/.local/bin; Windows has neither, and a Windows shim is not
+// provided, so the command is refused rather than writing a script that could
+// never run.
+func shimInstallUnsupported(goos string) string {
+	if goos == "windows" {
+		return "op-forward install creates a POSIX shell shim and is not supported on Windows; on a Windows daemon host run op-forward serve"
+	}
+	return ""
+}
+
 func runInstall() error {
+	if reason := shimInstallUnsupported(runtime.GOOS); reason != "" {
+		return errors.New(reason)
+	}
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	// The shim reads OP_FORWARD_ADDR / OP_FORWARD_HOST / OP_FORWARD_PORT at
 	// run time, so nothing is baked in here. --port is accepted for scripts

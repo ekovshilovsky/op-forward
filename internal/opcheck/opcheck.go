@@ -32,12 +32,16 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ekovshilovsky/op-forward/internal/executor"
 )
 
 // ShimSignature is the text every op-forward shim carries in its header
@@ -72,6 +76,17 @@ const (
 	// SessionReason says how.
 	SessionFailed = "failed"
 )
+
+// Refusal values explain why a located op binary is not executed.
+const (
+	// RefusalNotNativeExecutable means the binary found on PATH is not a
+	// native Windows executable (op.exe). A .bat or .cmd file would be run
+	// through cmd.exe, which re-parses arguments, so the daemon refuses it.
+	RefusalNotNativeExecutable = "not_native_executable"
+)
+
+// extensionPattern bounds what may be reported as the refused extension.
+var extensionPattern = regexp.MustCompile(`^\.[0-9A-Za-z]{1,8}$`)
 
 // Reasons classify a failed authenticated probe. The exit status alone
 // decides success or failure; the reason is derived from stderr text on a
@@ -112,6 +127,15 @@ const (
 type Report struct {
 	// OpPresent reports whether a real (non-shim) op binary was found on PATH.
 	OpPresent bool `json:"op_present"`
+	// OpRefusal is one of the Refusal* values when an op binary was found
+	// but the daemon would refuse to execute it, and empty otherwise. A
+	// refused binary is not run by Check either, so every other field then
+	// describes "not examined" rather than "failed".
+	OpRefusal string `json:"op_refusal,omitempty"`
+	// OpExtension is the extension of the refused binary (for example
+	// ".cmd"), kept only when it is short and alphanumeric so unexpected
+	// input can never flow into the diagnostic. Empty unless OpRefusal is set.
+	OpExtension string `json:"op_extension,omitempty"`
 	// OpVersion is the version printed by "op --version", or empty when the
 	// binary could not be executed.
 	OpVersion string `json:"op_version"`
@@ -160,22 +184,70 @@ var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,31}$`)
 // Locate returns the path of the real op binary on PATH. Entries that are
 // op-forward shims are skipped, as are relative PATH entries, which would
 // make the answer depend on the working directory.
+//
+// On Windows the binary is op.exe, so each directory is searched for the
+// names produced by appending the PATHEXT extensions, in PATHEXT order, which
+// mirrors how exec.LookPath resolves "op" when the daemon later runs it.
 func Locate() (string, bool) {
+	names := candidateNames(runtime.GOOS, os.Getenv("PATHEXT"))
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if !filepath.IsAbs(dir) {
 			continue
 		}
-		candidate := filepath.Join(dir, "op")
-		info, err := os.Stat(candidate)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			continue
+		for _, name := range names {
+			candidate := filepath.Join(dir, name)
+			info, err := os.Stat(candidate)
+			if err != nil || !isExecutable(runtime.GOOS, info) {
+				continue
+			}
+			if IsShim(candidate) {
+				continue
+			}
+			return candidate, true
 		}
-		if IsShim(candidate) {
-			continue
-		}
-		return candidate, true
 	}
 	return "", false
+}
+
+// defaultPathExt is the Windows default used when PATHEXT is unset or empty.
+const defaultPathExt = ".COM;.EXE;.BAT;.CMD"
+
+// candidateNames lists the file names under which the op binary may exist in
+// a PATH directory on goos. Unix has the single name "op". Windows has no
+// extensionless executables, so the names are "op" plus each PATHEXT entry.
+func candidateNames(goos, pathExt string) []string {
+	if goos != "windows" {
+		return []string{"op"}
+	}
+	if strings.TrimSpace(pathExt) == "" {
+		pathExt = defaultPathExt
+	}
+	var names []string
+	for _, ext := range strings.Split(pathExt, ";") {
+		ext = strings.TrimSpace(ext)
+		if ext == "" {
+			continue
+		}
+		if !strings.HasPrefix(ext, ".") {
+			ext = "." + ext
+		}
+		names = append(names, "op"+strings.ToLower(ext))
+	}
+	return names
+}
+
+// isExecutable reports whether a located file can plausibly be run as op.
+// Unix requires a regular file with an execute bit. Windows has no execute
+// bit (Go reports the same synthetic permissions for every file) and decides
+// executability by extension, which candidateNames has already applied, so
+// anything that is not a directory qualifies. Windows reparse points such as
+// winget links or execution aliases are not "regular" files, which is why the
+// test is looser there.
+func isExecutable(goos string, info fs.FileInfo) bool {
+	if goos == "windows" {
+		return !info.IsDir()
+	}
+	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 // IsShim reports whether the file at path is an op-forward shim, judged by
@@ -197,6 +269,13 @@ func IsShim(path string) bool {
 // Check gathers the op integration report. It never returns an error: every
 // failure is itself a classification carried in the Report.
 func Check(ctx context.Context, opts Options) Report {
+	return check(ctx, opts, executor.ValidateResolvedPath)
+}
+
+// check implements Check with the resolved-path validator injected, so the
+// refusal path can be exercised on platforms whose real validator accepts
+// every path.
+func check(ctx context.Context, opts Options, validate func(string) error) Report {
 	if opts.MetadataTimeout <= 0 {
 		opts.MetadataTimeout = DefaultMetadataTimeout
 	}
@@ -213,6 +292,20 @@ func Check(ctx context.Context, opts Options) Report {
 		return rep
 	}
 	rep.OpPresent = true
+
+	// The daemon refuses to execute some binaries it can find (on Windows,
+	// anything that is not a native .exe). Locate stays a pure lookup so the
+	// diagnostic can say what is there, but running the binary here would
+	// execute exactly what the daemon will not, so it is reported and left
+	// alone.
+	if err := validate(opPath); err != nil {
+		rep.OpRefusal = RefusalNotNativeExecutable
+		var notNative *executor.NotNativeExecutableError
+		if errors.As(err, &notNative) && extensionPattern.MatchString(notNative.Ext) {
+			rep.OpExtension = strings.ToLower(notNative.Ext)
+		}
+		return rep
+	}
 
 	rep.OpVersion = readVersion(ctx, opPath, opts.MetadataTimeout)
 
@@ -240,7 +333,7 @@ func runOp(ctx context.Context, opPath string, timeout time.Duration, stdout io.
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// #nosec G204 -- opPath is the absolute path returned by Locate, and every argument is a compile-time constant defined in this package; no shell is involved
+	// #nosec G204 -- opPath is the absolute path returned by Locate and has passed executor.ValidateResolvedPath in check, and every argument is a compile-time constant defined in this package; no shell is involved on any platform: unix executes the file directly, and on Windows the validator requires a native .exe because CreateProcess runs .bat and .cmd files through cmd.exe
 	cmd := exec.CommandContext(ctx, opPath, args...)
 	var errBuf cappedBuffer
 	cmd.Stdout = stdout

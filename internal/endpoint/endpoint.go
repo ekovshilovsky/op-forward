@@ -12,12 +12,20 @@
 package endpoint
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
+
+// errUnixUnsupported is returned for any unix:// endpoint on Windows. The
+// unix transport relies on POSIX ownership and permission checks that have
+// no verifiable Windows equivalent here, so it is refused outright rather
+// than served with weaker guarantees.
+var errUnixUnsupported = errors.New("unix sockets are not supported on Windows; use tcp://127.0.0.1:PORT")
 
 // Endpoint is a parsed transport address. Network is a value accepted by
 // net.Dial and net.Listen ("tcp" or "unix"); Address is the corresponding
@@ -31,6 +39,12 @@ type Endpoint struct {
 // Endpoint. Anything else is rejected so that a typo in an environment
 // variable fails loudly at startup instead of silently falling back.
 func Parse(raw string) (Endpoint, error) {
+	return parseFor(raw, runtime.GOOS)
+}
+
+// parseFor implements Parse for an explicit target operating system so the
+// per-platform rules can be exercised from any host.
+func parseFor(raw, goos string) (Endpoint, error) {
 	scheme, rest, ok := strings.Cut(raw, "://")
 	if !ok {
 		return Endpoint{}, fmt.Errorf("endpoint %q must be of the form tcp://host:port or unix:///path", raw)
@@ -49,6 +63,9 @@ func Parse(raw string) (Endpoint, error) {
 		}
 		return Endpoint{Network: "tcp", Address: net.JoinHostPort(host, port)}, nil
 	case "unix":
+		if goos == "windows" {
+			return Endpoint{}, fmt.Errorf("endpoint %q: %w", raw, errUnixUnsupported)
+		}
 		if rest == "" {
 			return Endpoint{}, fmt.Errorf("endpoint %q: unix socket path is empty", raw)
 		}

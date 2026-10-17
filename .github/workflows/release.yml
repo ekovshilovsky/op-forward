@@ -43,7 +43,7 @@ jobs:
           # The dispatch input is passed through the environment rather than
           # interpolated into the script, so its value can never be executed
           # as shell.
-          VERSION_INPUT: ${VERSION_INPUT}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             echo "TAG_NAME=v${VERSION_INPUT}" >> "$GITHUB_ENV"
@@ -66,13 +66,22 @@ jobs:
         run: |
           VERSION="${TAG_NAME#v}"
           LDFLAGS="-s -w -X github.com/ekovshilovsky/op-forward/cmd.Version=${VERSION}"
-          for PAIR in "linux amd64" "linux arm64" "darwin amd64" "darwin arm64"; do
+          for PAIR in "linux amd64" "linux arm64" "darwin amd64" "darwin arm64" "windows amd64" "windows arm64"; do
             OS=$(echo "$PAIR" | cut -d' ' -f1)
             ARCH=$(echo "$PAIR" | cut -d' ' -f2)
             DIR="op-forward_${VERSION}_${OS}_${ARCH}"
             mkdir -p "dist/${DIR}"
-            GOOS="$OS" GOARCH="$ARCH" go build -trimpath -ldflags="${LDFLAGS}" -o "dist/${DIR}/op-forward" .
-            tar -czf "dist/${DIR}.tar.gz" -C "dist/${DIR}" op-forward
+            if [ "$OS" = windows ]; then
+              # Windows binaries carry the .exe suffix and ship as a zip, the
+              # archive format Windows extracts natively. They are attached to
+              # the release only: the Homebrew formula and the Linux package
+              # repositories do not apply to Windows.
+              GOOS="$OS" GOARCH="$ARCH" go build -trimpath -ldflags="${LDFLAGS}" -o "dist/${DIR}/op-forward.exe" .
+              (cd "dist/${DIR}" && zip -q "../${DIR}.zip" op-forward.exe)
+            else
+              GOOS="$OS" GOARCH="$ARCH" go build -trimpath -ldflags="${LDFLAGS}" -o "dist/${DIR}/op-forward" .
+              tar -czf "dist/${DIR}.tar.gz" -C "dist/${DIR}" op-forward
+            fi
           done
 
       - name: Verify Linux binaries are statically linked
@@ -91,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$TAG_NAME" dist/*.tar.gz \
+          gh release create "$TAG_NAME" dist/*.tar.gz dist/*.zip \
             --title "$TAG_NAME" \
             --generate-notes
 

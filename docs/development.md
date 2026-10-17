@@ -198,6 +198,10 @@ pushed tag matching `v*` and on manual dispatch (the dry run). Jobs:
    1. Resolve the version: the tag name without `v`, or the dispatch input.
    2. Build binaries for linux and darwin on amd64 and arm64 with cgo disabled,
       `-trimpath`, and the version stamp; archive each as `op-forward_<version>_<os>_<arch>.tar.gz`.
+      Windows (amd64 and arm64) is built the same way and archived as
+      `op-forward_<version>_windows_<arch>.zip` containing `op-forward.exe`; Windows
+      archives are attached to the release only, not to the Homebrew formula or
+      the Linux package repositories.
    3. Fail unless every Linux binary is reported by `file` as statically linked.
    4. Create the GitHub release with the tarballs and generated notes.
    5. Update the Homebrew formula in the project's tap repository with the new

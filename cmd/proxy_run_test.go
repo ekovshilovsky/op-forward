@@ -1,8 +1,9 @@
+//go:build !windows
+
 package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -260,18 +261,6 @@ func runProxyArgs(t *testing.T, proxyArgs ...string) proxyOutcome {
 func runForwarded(t *testing.T, opArgs ...string) proxyOutcome {
 	t.Helper()
 	return runProxyArgs(t, append([]string{"--"}, opArgs...)...)
-}
-
-// requireExitStatus fails unless err is an ExitStatus carrying want.
-func requireExitStatus(t *testing.T, err error, want int) {
-	t.Helper()
-	var status ExitStatus
-	if !errors.As(err, &status) {
-		t.Fatalf("error = %v (%T), want ExitStatus(%d)", err, err, want)
-	}
-	if int(status) != want {
-		t.Fatalf("exit status = %d, want %d", int(status), want)
-	}
 }
 
 // requireSuccess fails unless err is nil, the proxy's signal for exit 0.

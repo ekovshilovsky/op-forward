@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -122,7 +123,7 @@ func runDoctor() error {
 		return ExitStatus(doctorExitUsage)
 	}
 
-	shimPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "op")
+	shimPath := defaultShimPath(runtime.GOOS)
 	resolvedRole := resolveRole(*role, shimPath)
 
 	explicit := explicitFlags(fs)
@@ -159,6 +160,17 @@ func runDoctor() error {
 	return nil
 }
 
+// defaultShimPath is where "op-forward install" places the op shim. The shim
+// is a POSIX shell script, so Windows has no shim location: an empty path
+// makes role resolution ignore shims and the shim check report itself as not
+// applicable.
+func defaultShimPath(goos string) string {
+	if goos == "windows" {
+		return ""
+	}
+	return filepath.Join(os.Getenv("HOME"), ".local", "bin", "op")
+}
+
 // resolveRole decides which role to diagnose. An op-forward shim marks a
 // client even when a real op binary also exists on the machine, because the
 // shim's fallback target makes that common and a client must not be judged
@@ -189,6 +201,10 @@ type doctor struct {
 	renewal renewalState
 	// renewalFailure is the finding when renewal is renewalFailed.
 	renewalFailure opComponent
+	// goos overrides runtime.GOOS for the platform-dependent wording and
+	// applicability of checks; empty means the running platform. Tests set it
+	// to exercise other platforms from any host.
+	goos string
 	// probeTimeout bounds the local authenticated probe in the host role; zero
 	// selects opcheck.DefaultProbeTimeout. Tests shorten it.
 	probeTimeout time.Duration
@@ -207,6 +223,14 @@ const (
 	// renewalDeclined: renewal was needed but --no-refresh forbade it.
 	renewalDeclined
 )
+
+// targetOS returns the platform whose conventions the report follows.
+func (d *doctor) targetOS() string {
+	if d.goos != "" {
+		return d.goos
+	}
+	return runtime.GOOS
+}
 
 // announceProbe tells the operator, on stderr, that an authenticated probe is
 // starting and may wait for an action on the host. A probe against a locked
@@ -297,6 +321,13 @@ func (d *doctor) checkShim() doctorCheck {
 		return check
 	}
 
+	// The shim is a POSIX shell script and no Windows equivalent exists, so
+	// the check cannot apply there. It is a skip rather than a warning: a
+	// Windows machine has nothing to install and nothing is misconfigured.
+	if d.targetOS() == "windows" {
+		return set(shimAbsent, statusSkip, "op shims are not supported on Windows; this check does not apply", "")
+	}
+
 	content, err := os.ReadFile(d.shimPath) // #nosec G304 -- the shim lives at a fixed location under the invoking user's own home directory, which is the file this check exists to inspect
 	switch {
 	case os.IsNotExist(err):
@@ -347,7 +378,12 @@ func (d *doctor) checkEndpoint(ep endpoint.Endpoint, epErr error) (doctorCheck, 
 	if err := ep.Probe(doctorProbeTimeout); err != nil {
 		data["reachable"] = false
 		action := "start the daemon on the host (op-forward serve, or op-forward service install) and check the SSH tunnel or port forward"
-		if d.role == roleHost {
+		switch {
+		case d.role == roleHost && d.targetOS() == "windows":
+			// Service management is macOS-only; on Windows the daemon is
+			// started by hand or by a scheduled task the operator creates.
+			action = "start the daemon (op-forward serve)"
+		case d.role == roleHost:
 			action = "start the daemon (op-forward serve, or op-forward service install)"
 		}
 		return doctorCheck{
@@ -631,8 +667,13 @@ func (d *doctor) checkLocalOp() []doctorCheck {
 	}
 	rep := opcheck.Check(context.Background(), opcheck.Options{Authenticated: d.interactive, ProbeTimeout: d.probeTimeout})
 	cli, integ, sess := describeOp(rep, "this host")
+	if d.targetOS() == "windows" && !rep.OpPresent {
+		// describeCLI words its remedy for a launchd-managed daemon, which
+		// does not exist on Windows.
+		cli.action = "install the 1Password CLI (op.exe) and make sure its directory is on the PATH of the process that runs the daemon"
+	}
 	return []doctorCheck{
-		cli.asCheck("op_cli", map[string]any{"op_present": rep.OpPresent, "op_version": rep.OpVersion}),
+		cli.asCheck("op_cli", opCLIData(rep)),
 		integ.asCheck("op_integration", map[string]any{"integration": rep.Integration, "account_count": rep.AccountCount}),
 		sess.asCheck("op_session", map[string]any{"session": rep.Session, "session_reason": rep.SessionReason}),
 	}
@@ -658,11 +699,29 @@ func describeOp(rep opcheck.Report, where string) (cli, integ, sess opComponent)
 	return cli, integ, sess
 }
 
+// opCLIData is the structured detail of the op_cli check. The refusal fields
+// appear only when set, so a report for a runnable op is unchanged.
+func opCLIData(rep opcheck.Report) map[string]any {
+	data := map[string]any{"op_present": rep.OpPresent, "op_version": rep.OpVersion}
+	if rep.OpRefusal != "" {
+		data["op_refusal"] = rep.OpRefusal
+		data["op_extension"] = rep.OpExtension
+	}
+	return data
+}
+
 func describeCLI(rep opcheck.Report, where string) opComponent {
 	switch {
 	case !rep.OpPresent:
 		return opComponent{statusFail, "op CLI not found on the PATH of " + where,
 			"install the 1Password CLI and make sure it is on the PATH of the process that runs the daemon (a launchd service uses the PATH in its plist; re-run op-forward service install)"}
+	case rep.OpRefusal != "":
+		// Failure rather than warning: every forwarded command resolves the
+		// same file and is refused, so nothing can work until it is fixed.
+		return opComponent{statusFail,
+			"op was found on " + where + " as " + refusedOpName(rep) + " but the daemon refuses to run it: only a native op.exe is executed, " +
+				"because a .bat or .cmd file would be run through cmd.exe, which re-parses arguments",
+			"install the official 1Password CLI (op.exe), remove or rename the " + refusedOpName(rep) + " on the daemon's PATH or put op.exe ahead of it, and restart the daemon so it sees the new PATH"}
 	case rep.OpVersion == "":
 		return opComponent{statusFail, "op was found on " + where + " but op --version failed or printed unexpected output",
 			"run op --version in a terminal on the host and repair the installation"}
@@ -670,9 +729,21 @@ func describeCLI(rep opcheck.Report, where string) opComponent {
 	return opComponent{statusOK, "op " + rep.OpVersion, ""}
 }
 
+// refusedOpName names the refused binary for messages: "op" plus the reported
+// extension, or a generic phrase when the extension was not reported.
+func refusedOpName(rep opcheck.Report) string {
+	if rep.OpExtension == "" {
+		return "a file that is not op.exe"
+	}
+	return "op" + rep.OpExtension
+}
+
 func describeIntegration(rep opcheck.Report, where string) opComponent {
 	switch rep.Integration {
 	case opcheck.IntegrationUnavailable:
+		if rep.OpRefusal != "" {
+			return opComponent{statusSkip, "not checked: the op on " + where + " is not run because the daemon refuses it (see op_cli)", ""}
+		}
 		return opComponent{statusSkip, "not checked: no op CLI", ""}
 	case opcheck.IntegrationUnreachable:
 		return opComponent{statusFail, "op account list failed on " + where + ": the 1Password integration did not answer",
@@ -749,19 +820,24 @@ func foldOpComponents(id string, rep opcheck.Report, parts ...opComponent) docto
 			}
 		}
 	}
+	data := map[string]any{
+		"op_present":     rep.OpPresent,
+		"op_version":     rep.OpVersion,
+		"integration":    rep.Integration,
+		"account_count":  rep.AccountCount,
+		"session":        rep.Session,
+		"session_reason": rep.SessionReason,
+	}
+	if rep.OpRefusal != "" {
+		data["op_refusal"] = rep.OpRefusal
+		data["op_extension"] = rep.OpExtension
+	}
 	return doctorCheck{
 		ID:      id,
 		Status:  worst.status,
 		Summary: strings.Join(summaries, "; "),
 		Action:  action,
-		Data: map[string]any{
-			"op_present":     rep.OpPresent,
-			"op_version":     rep.OpVersion,
-			"integration":    rep.Integration,
-			"account_count":  rep.AccountCount,
-			"session":        rep.Session,
-			"session_reason": rep.SessionReason,
-		},
+		Data:    data,
 	}
 }
 

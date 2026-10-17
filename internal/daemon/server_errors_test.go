@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,9 @@ func TestStart_RefusesNonLoopbackTCP(t *testing.T) {
 // goroutine outlives the test, exactly as in TestServeOverUnixEndpoint. The
 // socket lives in a private temp directory that is removed on teardown.
 func TestStart_ServesOverUnixSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix endpoints are rejected on Windows")
+	}
 	dir, err := os.MkdirTemp("", "opf")
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,9 @@
 package endpoint
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestForDialUsesHostAndPortWhenAddrEmpty(t *testing.T) {
 	ep, err := ForDial("", "host.docker.internal", 20000)
@@ -13,6 +16,9 @@ func TestForDialUsesHostAndPortWhenAddrEmpty(t *testing.T) {
 }
 
 func TestForDialAddrWins(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix endpoints are rejected on Windows; see transport_windows_test.go")
+	}
 	ep, err := ForDial("unix:///run/op-forward.sock", "host.docker.internal", 20000)
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +45,9 @@ func TestForListenDefaultsToLoopbackTCP(t *testing.T) {
 }
 
 func TestForListenExplicitWins(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix endpoints are rejected on Windows; see transport_windows_test.go")
+	}
 	ep, err := ForListen("unix:///run/op-forward.sock", 20000)
 	if err != nil {
 		t.Fatal(err)
