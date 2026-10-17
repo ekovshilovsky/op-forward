@@ -1,13 +1,11 @@
 package executor
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"time"
-
-	"github.com/creack/pty"
 )
 
 const (
@@ -76,8 +74,17 @@ func (r *Request) Validate() error {
 }
 
 // Execute runs an op command with the given arguments.
-// The command is executed directly (no shell), preventing injection.
+// The command is executed directly (no shell), preventing injection. On
+// Windows that guarantee depends on ValidateResolvedPath, which refuses any
+// resolved op that is not a native .exe.
 func Execute(req *Request) (*Result, error) {
+	return execute(req, ValidateResolvedPath)
+}
+
+// execute implements Execute with the resolved-path validator injected, so
+// the refusal branch can be exercised on platforms whose real validator
+// accepts everything.
+func execute(req *Request, validate func(string) error) (*Result, error) {
 	if err := req.Validate(); err != nil {
 		return &Result{
 			Stderr:   err.Error(),
@@ -101,38 +108,33 @@ func Execute(req *Request) (*Result, error) {
 		return nil, fmt.Errorf("op CLI not found in PATH: %w", err)
 	}
 
-	// #nosec G204 -- opPath is the absolute path returned by exec.LookPath("op"), and every argument has passed Request.Validate (argument count and length limits, blocked subcommands, shell metacharacters rejected); no shell is involved
-	cmd := exec.CommandContext(ctx, opPath, req.Args...)
-
-	// Run op inside a full pseudo-TTY so it detects an interactive session
-	// on all file descriptors (stdin, stdout, stderr). Without a TTY,
-	// 1Password caches the biometric approval and skips Touch ID on
-	// subsequent calls. With a full PTY, each invocation triggers a fresh
-	// biometric prompt — matching the behavior of running op directly in
-	// a terminal.
-	//
-	// Trade-off: PTY merges stdout and stderr into a single stream. We
-	// capture the combined output as stdout and leave stderr empty.
-	cmd.SysProcAttr = newSysProcAttr()
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("starting op with pty: %w", err)
+	// The resolved path must be launchable without a shell. This runs before
+	// anything is started, so a refused op never executes at all.
+	if err := validate(opPath); err != nil {
+		return nil, err
 	}
 
-	// Disable the PTY's output post-processing (OPOST) so the line discipline
-	// does not convert \n to \r\n. This preserves the raw output from op and
-	// avoids fragile string replacement that could corrupt binary data or
-	// fields containing legitimate carriage returns. Platform-specific because
-	// macOS uses TIOCGETA/TIOCSETA and Linux uses TCGETS/TCSETS.
-	disableOutputPostProcessing(ptmx)
+	// #nosec G204 -- opPath is the absolute path returned by exec.LookPath("op") and has passed ValidateResolvedPath, and every argument has passed Request.Validate (argument count and length limits, blocked subcommands, shell metacharacters rejected); no shell is involved on any platform: unix executes the file directly, and on Windows ValidateResolvedPath requires a native .exe, because CreateProcess runs .bat and .cmd files through cmd.exe, which would re-parse the arguments
+	cmd := exec.CommandContext(ctx, opPath, req.Args...)
 
-	// Read all output from the PTY master
-	var output bytes.Buffer
-	_, _ = output.ReadFrom(ptmx)
-	_ = ptmx.Close()
+	// Platform-specific launch. The unix implementation runs op inside a
+	// pseudo-TTY (merged output); the Windows implementation uses plain pipes
+	// (separate stdout and stderr). See exec_pty.go and exec_windows.go.
+	stdout, stderr, runErr := runCommand(cmd)
 
-	// Wait for the command to finish
-	err = cmd.Wait()
+	return interpretRun(ctx, stdout, stderr, runErr)
+}
+
+// interpretRun converts the outcome of a platform runner into the Result
+// contract shared by every platform. It holds the ordering rules that must
+// not vary by operating system.
+func interpretRun(ctx context.Context, stdout, stderr string, runErr error) (*Result, error) {
+	// A launch failure means op never ran, so neither the deadline nor an
+	// exit status applies; report it as the infrastructure error it is.
+	var startErr *startError
+	if errors.As(runErr, &startErr) {
+		return nil, startErr.err
+	}
 
 	// The context cancels a running command by killing it, so a timed-out
 	// child reaches this point as an *exec.ExitError with exit status -1,
@@ -147,17 +149,26 @@ func Execute(req *Request) (*Result, error) {
 	}
 
 	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return nil, fmt.Errorf("executing op: %w", err)
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			return nil, fmt.Errorf("executing op: %w", runErr)
 		}
+		exitCode = exitErr.ExitCode()
 	}
 
 	return &Result{
-		Stdout:   output.String(),
-		Stderr:   "",
+		Stdout:   stdout,
+		Stderr:   stderr,
 		ExitCode: exitCode,
 	}, nil
 }
+
+// startError marks a failure to launch op at all, as opposed to a failure
+// observed while waiting for it. Launch failures are infrastructure errors
+// reported to the caller as-is, and they must never be mistaken for a relayed
+// op exit status.
+type startError struct{ err error }
+
+func (e *startError) Error() string { return e.err.Error() }
+func (e *startError) Unwrap() error { return e.err }

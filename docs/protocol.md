@@ -89,6 +89,8 @@ Response, `200 OK` (`401` without a valid access token, `405` for other methods)
 | Field | Values |
 |---|---|
 | `op_present` | A real `op` (not an op-forward shim) was found on the daemon's `PATH` |
+| `op_refusal` | Present only when an `op` was found but the daemon refuses to run it: `not_native_executable` (Windows only: the resolved file is not an `.exe`, for example `op.cmd`). The binary is not executed by the health check either, and `integration` is then `unavailable` |
+| `op_extension` | Present with `op_refusal`: the refused file's extension in lower case (for example `.cmd`), omitted if it is not a short alphanumeric extension |
 | `op_version` | Output of `op --version`; empty if it could not be run |
 | `integration` | `reachable` (`op account list` answered), `unreachable`, or `unavailable` (no `op`) |
 | `account_count` | Number of accounts listed, or `null` if unknown. No account identifiers are ever returned |

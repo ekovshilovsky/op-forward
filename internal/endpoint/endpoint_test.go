@@ -1,6 +1,7 @@
 package endpoint
 
 import (
+	"runtime"
 	"testing"
 )
 
@@ -25,6 +26,9 @@ func TestParseTCPIPv6(t *testing.T) {
 }
 
 func TestParseUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix endpoints are rejected on Windows; see TestParseUnixRejectedOnWindows")
+	}
 	ep, err := Parse("unix:///tmp/op-forward.sock")
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)

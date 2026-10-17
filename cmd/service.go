@@ -77,6 +77,9 @@ func dispatchService(goos string, args []string) error {
 	}
 
 	if goos != "darwin" {
+		if goos == "windows" {
+			return fmt.Errorf("service management is only supported on macOS; on Windows run op-forward serve in a terminal, or register op-forward.exe serve as a Task Scheduler task or service yourself")
+		}
 		return fmt.Errorf("service management is only supported on macOS")
 	}
 

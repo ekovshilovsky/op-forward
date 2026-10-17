@@ -148,7 +148,9 @@ op-forward service uninstall
 ```
 
 Manages a launchd LaunchAgent for the daemon. Available on macOS only; elsewhere
-the command fails with `service management is only supported on macOS`. With no
+the command fails with `service management is only supported on macOS` (on
+Windows the message adds that you can run `op-forward serve` or register it as a
+scheduled task yourself). With no
 second word it prints `Usage: op-forward service [install|uninstall]`; any other
 word is an error (`unknown service command: NAME`). No flags are accepted.
 
@@ -182,7 +184,8 @@ Unloads the job (ignoring errors), removes the plist if it exists, and prints
 op-forward update
 ```
 
-Replaces the running binary with the latest GitHub release.
+Replaces the running binary with the latest GitHub release. Not available on
+Windows, where the command refuses to run and explains how to update by hand.
 
 1. Print the current version and query
    `https://api.github.com/repos/ekovshilovsky/op-forward/releases/latest`.

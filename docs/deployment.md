@@ -80,6 +80,48 @@ The plist records the resolved path of the binary. Run `service install` again
 after the binary moves, for example after a Homebrew upgrade replaces a
 versioned directory. Remove the service with `op-forward service uninstall`.
 
+### Windows host
+
+The daemon can run on a Windows machine that has the 1Password desktop app and
+the 1Password CLI (`op.exe`) installed. Download
+`op-forward_<version>_windows_<amd64|arm64>.zip` from the release page, extract
+`op-forward.exe` to a directory on `PATH`, and run it in a terminal:
+
+```powershell
+op-forward.exe serve
+```
+
+What differs from a macOS or Linux host:
+
+- Only loopback TCP is supported. `unix://` endpoints are refused with
+  `unix sockets are not supported on Windows; use tcp://127.0.0.1:PORT`.
+- Tokens live under `%LocalAppData%\op-forward`. Windows ignores the POSIX
+  0700/0600 modes the daemon requests; protection comes from the access control
+  list the user profile directory carries by default, which does not grant other
+  standard users access (verify this on your machine if the profile ACLs have been
+  customized). Do not point `OP_FORWARD_TOKEN_DIR` at a shared location.
+- `op` output is captured through ordinary pipes rather than a pseudo-terminal,
+  so stdout and stderr are returned separately. The macOS behavior of forcing a
+  fresh biometric prompt on every call comes from the pseudo-terminal and is
+  **not verified** on Windows: whether each call raises its own Windows Hello
+  prompt or the 1Password app reuses an approval has to be observed on the
+  machine.
+- The daemon only runs a native `op.exe`. If the `op` it resolves from `PATH` is
+  a `.bat` or `.cmd` file (or anything whose extension is not `.exe`), the
+  daemon refuses to execute it and every forwarded command fails with exit
+  status 127. Windows runs batch files through `cmd.exe`, which re-parses the
+  argument string, so no argument filter can make that safe; refusing the file
+  is the control. Install the official 1Password CLI, which is `op.exe`. With the
+  default `PATHEXT` order a native `op.exe` wins over an `op.cmd` in the same
+  directory, but an `op.cmd` in an earlier `PATH` directory shadows it.
+  `op-forward doctor` reports a refused `op` as a failure on the `op_cli` check
+  (and on `daemon_op` from a client). This restriction does not exist on macOS
+  or Linux, where `op` is executed directly.
+- `op-forward service`, `op-forward install` (the POSIX shim) and
+  `op-forward update` are not available. Start the daemon with
+  `op-forward.exe serve`, or register that command as a Task Scheduler task
+  yourself. To update, replace `op-forward.exe` by hand after stopping the daemon.
+
 ## Remote setup
 
 Install `op-forward` on each remote machine by whichever route matches it, then

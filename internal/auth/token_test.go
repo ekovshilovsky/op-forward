@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -121,6 +122,9 @@ func TestSaveToPathAndLoadFromPath(t *testing.T) {
 }
 
 func TestSaveToPath_AtomicWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not reported on Windows; access is governed by the profile ACL of the cache directory")
+	}
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "atomic.token")
 
@@ -404,6 +408,9 @@ func TestTokenPath_EnvOverride(t *testing.T) {
 }
 
 func TestTokenFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not reported on Windows; access is governed by the profile ACL of the cache directory")
+	}
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.token")
 

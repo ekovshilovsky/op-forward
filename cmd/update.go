@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +14,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ekovshilovsky/op-forward/internal/endpoint"
@@ -39,7 +39,23 @@ type githubAsset struct {
 const daemonRespawnTimeout = 30 * time.Second
 
 func runUpdate() error {
+	if reason := selfUpdateUnsupported(runtime.GOOS); reason != "" {
+		return errors.New(reason)
+	}
 	return performUpdate(resolveExecutable, daemonRespawnTimeout)
+}
+
+// selfUpdateUnsupported explains why in-place self-update cannot run on goos,
+// or returns an empty string when it can. On Windows the running executable
+// is locked and cannot be replaced, the daemon is not supervised by launchd,
+// and releases are published as zip archives rather than the tar.gz archives
+// the updater understands, so the update is refused up front instead of
+// failing midway.
+func selfUpdateUnsupported(goos string) string {
+	if goos == "windows" {
+		return "self-update is not supported on Windows; download the latest op-forward_<version>_windows_<arch>.zip from the releases page, stop the running daemon, and replace op-forward.exe"
+	}
+	return ""
 }
 
 // performUpdate runs the update workflow: it looks up the latest release,
@@ -220,7 +236,7 @@ func restartDaemon(binPath string) bool {
 		fmt.Println("No running daemon found. It will pick up the new version on next start.")
 		return false
 	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := terminateProcess(pid); err != nil {
 		fmt.Printf("Could not restart daemon (PID %d): %v — restart manually with: launchctl kickstart gui/$(id -u)/com.op-forward.daemon\n", pid, err)
 		return false
 	}

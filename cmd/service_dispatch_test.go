@@ -1,3 +1,5 @@
+//go:build !windows
+
 package cmd
 
 import (
@@ -53,8 +55,11 @@ func TestDispatchServiceRefusesNonDarwinBeforeWritingFiles(t *testing.T) {
 	for _, goos := range []string{"linux", "windows", "freebsd"} {
 		for _, sub := range []string{"install", "uninstall", "bogus"} {
 			err := dispatchService(goos, []string{"op-forward", "service", sub})
-			if err == nil || err.Error() != "service management is only supported on macOS" {
+			if err == nil || !strings.HasPrefix(err.Error(), "service management is only supported on macOS") {
 				t.Errorf("dispatchService(%s, %s) error = %v, want the macOS-only refusal", goos, sub, err)
+			}
+			if goos != "windows" && err != nil && err.Error() != "service management is only supported on macOS" {
+				t.Errorf("dispatchService(%s, %s) error = %q, want the unchanged macOS-only message", goos, sub, err)
 			}
 		}
 	}
